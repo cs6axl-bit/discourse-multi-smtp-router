@@ -271,4 +271,68 @@ plugins:
     default: false
     client: false
 
-  multi_smtp_rout
+  multi_smtp_router_p4_smtp_tls:
+    default: false
+    client: false
+
+  multi_smtp_router_p4_smtp_domain:
+    default: ""
+    client: false
+
+  # =========================
+  # PROVIDER 5
+  # =========================
+  multi_smtp_router_p5_enabled:
+    default: false
+    client: false
+
+  multi_smtp_router_p5_id:
+    default: "provider_C"
+    client: false
+
+  multi_smtp_router_p5_from_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p5_reply_to_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p5_smtp_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p5_smtp_port:
+    default: 587
+    min: 0
+    max: 65535
+    client: false
+
+  multi_smtp_router_p5_smtp_username:
+    default: ""
+    client: false
+
+  multi_smtp_router_p5_smtp_password:
+    default: ""
+    secret: true
+    client: false
+
+  multi_smtp_router_p5_smtp_authentication_mode:
+    default: "plain"
+    client: false
+
+  multi_smtp_router_p5_smtp_enable_starttls_auto:
+    default: true
+    client: false
+
+  multi_smtp_router_p5_smtp_ssl:
+    default: false
+    client: false
+
+  multi_smtp_router_p5_smtp_tls:
+    default: false
+    client: false
+
+  multi_smtp_router_p5_smtp_domain:
+    default: ""
+    client: false
