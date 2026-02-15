@@ -1,4 +1,7 @@
 plugins:
+  # =========================
+  # GLOBAL
+  # =========================
   multi_smtp_router_enabled:
     default: false
     client: false
@@ -15,15 +18,15 @@ plugins:
     default: true
     client: false
 
-  multi_smtp_router_override_domains:
-    default: "gmail.com|yahoo.com"
+  # List entries like:
+  # gmail.com=provider_X
+  # yahoo.com=provider_Y
+  multi_smtp_router_domain_provider_pairs:
     type: list
+    default: "gmail.com=provider_X|yahoo.com=provider_Y"
     client: false
 
-  multi_smtp_router_override_provider_id:
-    default: "provider_X"
-    client: false
-
+  # External log (async)
   multi_smtp_router_log_to_endpoint_enabled:
     default: false
     client: false
@@ -44,39 +47,228 @@ plugins:
     max: 60
     client: false
 
-  # Providers stored as JSON array. Marked secret because passwords are included.
-  multi_smtp_router_providers_json:
-    type: text
-    default: |
-      [
-        {
-          "id": "provider_X",
-          "is_active": 1,
-          "from_address": "My Site <noreply@myalt-sender.com>",
-          "reply_to_address": "Support <support@myalt-sender.com>",
-          "smtp": {
-            "address": "smtp.provider-x.com",
-            "port": 587,
-            "user_name": "username_x",
-            "password": "password_x",
-            "authentication": "plain",
-            "enable_starttls_auto": true
-          }
-        },
-        {
-          "id": "provider_A",
-          "is_active": 1,
-          "from_address": "My Site <noreply@domainA.com>",
-          "reply_to_address": "Support <support@domainA.com>",
-          "smtp": {
-            "address": "smtp.provider-a.com",
-            "port": 587,
-            "user_name": "username_a",
-            "password": "password_a",
-            "authentication": "plain",
-            "enable_starttls_auto": true
-          }
-        }
-      ]
+  # =========================
+  # PROVIDER 1
+  # =========================
+  multi_smtp_router_p1_enabled:
+    default: false
     client: false
+
+  multi_smtp_router_p1_id:
+    default: "provider_X"
+    client: false
+
+  multi_smtp_router_p1_from_address:
+    default: "My Site <noreply@myalt-sender.com>"
+    client: false
+
+  multi_smtp_router_p1_reply_to_address:
+    default: "Support <support@myalt-sender.com>"
+    client: false
+
+  multi_smtp_router_p1_smtp_address:
+    default: "smtp.example.com"
+    client: false
+
+  multi_smtp_router_p1_smtp_port:
+    default: 587
+    min: 0
+    max: 65535
+    client: false
+
+  multi_smtp_router_p1_smtp_username:
+    default: ""
+    client: false
+
+  multi_smtp_router_p1_smtp_password:
+    default: ""
     secret: true
+    client: false
+
+  multi_smtp_router_p1_smtp_authentication_mode:
+    default: "plain"
+    client: false
+
+  multi_smtp_router_p1_smtp_enable_starttls_auto:
+    default: true
+    client: false
+
+  multi_smtp_router_p1_smtp_ssl:
+    default: false
+    client: false
+
+  multi_smtp_router_p1_smtp_tls:
+    default: false
+    client: false
+
+  multi_smtp_router_p1_smtp_domain:
+    default: ""
+    client: false
+
+  # =========================
+  # PROVIDER 2
+  # =========================
+  multi_smtp_router_p2_enabled:
+    default: false
+    client: false
+
+  multi_smtp_router_p2_id:
+    default: "provider_Y"
+    client: false
+
+  multi_smtp_router_p2_from_address:
+    default: "My Site <noreply@mysecond-sender.com>"
+    client: false
+
+  multi_smtp_router_p2_reply_to_address:
+    default: "Support <support@mysecond-sender.com>"
+    client: false
+
+  multi_smtp_router_p2_smtp_address:
+    default: "smtp.example.com"
+    client: false
+
+  multi_smtp_router_p2_smtp_port:
+    default: 587
+    min: 0
+    max: 65535
+    client: false
+
+  multi_smtp_router_p2_smtp_username:
+    default: ""
+    client: false
+
+  multi_smtp_router_p2_smtp_password:
+    default: ""
+    secret: true
+    client: false
+
+  multi_smtp_router_p2_smtp_authentication_mode:
+    default: "plain"
+    client: false
+
+  multi_smtp_router_p2_smtp_enable_starttls_auto:
+    default: true
+    client: false
+
+  multi_smtp_router_p2_smtp_ssl:
+    default: false
+    client: false
+
+  multi_smtp_router_p2_smtp_tls:
+    default: false
+    client: false
+
+  multi_smtp_router_p2_smtp_domain:
+    default: ""
+    client: false
+
+  # =========================
+  # PROVIDER 3
+  # =========================
+  multi_smtp_router_p3_enabled:
+    default: false
+    client: false
+
+  multi_smtp_router_p3_id:
+    default: "provider_A"
+    client: false
+
+  multi_smtp_router_p3_from_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p3_reply_to_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p3_smtp_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p3_smtp_port:
+    default: 587
+    min: 0
+    max: 65535
+    client: false
+
+  multi_smtp_router_p3_smtp_username:
+    default: ""
+    client: false
+
+  multi_smtp_router_p3_smtp_password:
+    default: ""
+    secret: true
+    client: false
+
+  multi_smtp_router_p3_smtp_authentication_mode:
+    default: "plain"
+    client: false
+
+  multi_smtp_router_p3_smtp_enable_starttls_auto:
+    default: true
+    client: false
+
+  multi_smtp_router_p3_smtp_ssl:
+    default: false
+    client: false
+
+  multi_smtp_router_p3_smtp_tls:
+    default: false
+    client: false
+
+  multi_smtp_router_p3_smtp_domain:
+    default: ""
+    client: false
+
+  # =========================
+  # PROVIDER 4
+  # =========================
+  multi_smtp_router_p4_enabled:
+    default: false
+    client: false
+
+  multi_smtp_router_p4_id:
+    default: "provider_B"
+    client: false
+
+  multi_smtp_router_p4_from_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p4_reply_to_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p4_smtp_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p4_smtp_port:
+    default: 587
+    min: 0
+    max: 65535
+    client: false
+
+  multi_smtp_router_p4_smtp_username:
+    default: ""
+    client: false
+
+  multi_smtp_router_p4_smtp_password:
+    default: ""
+    secret: true
+    client: false
+
+  multi_smtp_router_p4_smtp_authentication_mode:
+    default: "plain"
+    client: false
+
+  multi_smtp_router_p4_smtp_enable_starttls_auto:
+    default: true
+    client: false
+
+  multi_smtp_router_p4_smtp_ssl:
+    default: false
+    client: false
+
+  multi_smtp_rout
