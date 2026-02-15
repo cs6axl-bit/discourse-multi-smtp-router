@@ -1,0 +1,82 @@
+plugins:
+  multi_smtp_router_enabled:
+    default: false
+    client: false
+
+  multi_smtp_router_debug_log_enabled:
+    default: false
+    client: false
+
+  multi_smtp_router_random_enabled:
+    default: true
+    client: false
+
+  multi_smtp_router_domain_override_enabled:
+    default: true
+    client: false
+
+  multi_smtp_router_override_domains:
+    default: "gmail.com|yahoo.com"
+    type: list
+    client: false
+
+  multi_smtp_router_override_provider_id:
+    default: "provider_X"
+    client: false
+
+  multi_smtp_router_log_to_endpoint_enabled:
+    default: false
+    client: false
+
+  multi_smtp_router_log_endpoint_url:
+    default: "http://172.17.0.1:8081/smtp_router_log.php"
+    client: false
+
+  multi_smtp_router_log_http_open_timeout:
+    default: 2
+    min: 0
+    max: 60
+    client: false
+
+  multi_smtp_router_log_http_read_timeout:
+    default: 3
+    min: 0
+    max: 60
+    client: false
+
+  # Providers stored as JSON array. Marked secret because passwords are included.
+  multi_smtp_router_providers_json:
+    type: text
+    default: |
+      [
+        {
+          "id": "provider_X",
+          "is_active": 1,
+          "from_address": "My Site <noreply@myalt-sender.com>",
+          "reply_to_address": "Support <support@myalt-sender.com>",
+          "smtp": {
+            "address": "smtp.provider-x.com",
+            "port": 587,
+            "user_name": "username_x",
+            "password": "password_x",
+            "authentication": "plain",
+            "enable_starttls_auto": true
+          }
+        },
+        {
+          "id": "provider_A",
+          "is_active": 1,
+          "from_address": "My Site <noreply@domainA.com>",
+          "reply_to_address": "Support <support@domainA.com>",
+          "smtp": {
+            "address": "smtp.provider-a.com",
+            "port": 587,
+            "user_name": "username_a",
+            "password": "password_a",
+            "authentication": "plain",
+            "enable_starttls_auto": true
+          }
+        }
+      ]
+    client: false
+    secret: true
