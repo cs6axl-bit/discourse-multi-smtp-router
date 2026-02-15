@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # name: discourse-multi-smtp-router
-# about: Route outgoing emails through multiple SMTP providers (configured via site settings), random among enabled providers, optional domain->provider overrides, optional debug logs and async external logging.
-# version: 2.0.0
+# about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging.
+# version: 2.2.0
 # authors: you
 # required_version: 3.0.0
 
@@ -44,7 +44,7 @@ after_initialize do
     end
 
     # --------------------
-    # Settings access
+    # Global switches
     # --------------------
     def self.random_enabled?
       SiteSetting.multi_smtp_router_random_enabled
@@ -52,6 +52,10 @@ after_initialize do
 
     def self.domain_override_enabled?
       SiteSetting.multi_smtp_router_domain_override_enabled
+    end
+
+    def self.weighted_enabled?
+      SiteSetting.multi_smtp_router_weighted_enabled
     end
 
     def self.log_to_endpoint_enabled?
@@ -70,7 +74,11 @@ after_initialize do
       (SiteSetting.multi_smtp_router_log_http_read_timeout || 3).to_i
     end
 
-    # Domain->provider pairs stored as "domain=provider_id" (list setting)
+    # --------------------
+    # Domain->provider pairs stored as list entries:
+    # gmail.com=provider_X
+    # yahoo.com=provider_Y
+    # --------------------
     def self.domain_provider_map
       raw = Array(SiteSetting.multi_smtp_router_domain_provider_pairs)
 
@@ -95,7 +103,9 @@ after_initialize do
     end
 
     # --------------------
-    # Provider slots
+    # Provider slots (UI-configured)
+    # Each has: enabled, id, from, reply_to, smtp..., weight_percent
+    # Note: weight can be set even if provider disabled; it will be ignored because we only return enabled providers.
     # --------------------
     def self.providers
       out = []
@@ -111,6 +121,10 @@ after_initialize do
           from_addr = SiteSetting.public_send("multi_smtp_router_p#{i}_from_address").to_s.strip
           reply_to  = SiteSetting.public_send("multi_smtp_router_p#{i}_reply_to_address").to_s.strip
 
+          weight = SiteSetting.public_send("multi_smtp_router_p#{i}_weight_percent").to_i
+          weight = 0 if weight < 0
+          weight = 100 if weight > 100
+
           smtp_address = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_address").to_s.strip
           smtp_port    = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_port").to_i
           smtp_user    = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_username").to_s
@@ -122,16 +136,10 @@ after_initialize do
           tls           = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_tls")
           helo_domain   = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_domain").to_s.strip
 
-          smtp = {
-            address: smtp_address,
-            port: smtp_port
-          }
-
+          smtp = { address: smtp_address, port: smtp_port }
           smtp[:user_name] = smtp_user unless smtp_user.to_s.empty?
           smtp[:password] = smtp_pass unless smtp_pass.to_s.empty?
           smtp[:authentication] = smtp_auth unless smtp_auth.empty?
-
-          # booleans only set if true (keeps defaults otherwise)
           smtp[:enable_starttls_auto] = true if starttls_auto
           smtp[:ssl] = true if ssl
           smtp[:tls] = true if tls
@@ -140,6 +148,7 @@ after_initialize do
           out << {
             slot: i,
             id: id,
+            weight_percent: weight,
             from_address: from_addr,
             reply_to_address: reply_to,
             smtp: smtp
@@ -174,7 +183,33 @@ after_initialize do
     end
 
     # --------------------
+    # Weighted selection (coin flip / cumulative)
+    # - Only uses enabled providers (incoming list)
+    # - Uses integer weights (0..100) per provider
+    # - If sum is 0 => returns nil
+    # --------------------
+    def self.choose_weighted_provider(list)
+      weighted = list.select { |p| p[:weight_percent].to_i > 0 }
+      total = weighted.sum { |p| p[:weight_percent].to_i }
+      return [nil, 0] if total <= 0
+
+      r = rand(1..total)
+      cum = 0
+      weighted.each do |p|
+        cum += p[:weight_percent].to_i
+        return [p, total] if r <= cum
+      end
+
+      [weighted.last, total]
+    end
+
+    # --------------------
     # Routing decision
+    # Order:
+    #  1) domain override
+    #  2) weighted
+    #  3) equal random
+    #  4) none => default SMTP
     # --------------------
     def self.choose_provider(message)
       list = providers
@@ -182,13 +217,14 @@ after_initialize do
 
       domains = extract_recipient_domains(message)
 
-      # Domain override: check each domain in message, first match wins
+      # 1) Domain override wins
       if domain_override_enabled?
         map = domain_provider_map
         if !map.empty?
           domains.each do |d|
             pid = map[d]
             next if pid.nil? || pid.to_s.strip.empty?
+
             p = find_provider_by_id(pid)
             return [p, "domain_override(#{d}->#{pid})"] if p
             return [nil, "domain_override_provider_missing(#{d}->#{pid})"]
@@ -196,7 +232,18 @@ after_initialize do
         end
       end
 
-      # Random among enabled providers
+      # 2) Weighted mode
+      if weighted_enabled?
+        p, total = choose_weighted_provider(list)
+        if p
+          return [p, "weighted(total=#{total})"]
+        else
+          # Weights total zero across enabled providers
+          return [nil, "weighted_enabled_but_total_weight_zero"]
+        end
+      end
+
+      # 3) Equal random
       if random_enabled?
         return [list.sample, "random_enabled"]
       end
@@ -205,12 +252,11 @@ after_initialize do
     end
 
     # --------------------
-    # Apply provider
+    # Apply provider to THIS message
     # --------------------
     def self.apply_provider!(message, provider)
       return if message.nil? || provider.nil?
 
-      # From / Reply-To
       if provider[:from_address].to_s.strip.length > 0
         message["From"] = provider[:from_address].to_s
       end
@@ -218,7 +264,6 @@ after_initialize do
         message["Reply-To"] = provider[:reply_to_address].to_s
       end
 
-      # SMTP settings for THIS message
       smtp = provider[:smtp] || {}
       smtp.each do |k, v|
         message.delivery_method.settings[k.to_sym] = v
@@ -227,9 +272,7 @@ after_initialize do
 
     def self.safe_settings_snapshot(delivery_settings)
       h = (delivery_settings || {}).dup
-      if h.key?(:password)
-        h[:password] = "***"
-      end
+      h[:password] = "***" if h.key?(:password)
       h
     rescue
       {}
@@ -290,8 +333,22 @@ after_initialize do
 
     provider, reason = ::MultiSmtpRouter.choose_provider(message)
 
+    # If weighted enabled but total weight == 0, optionally fall back to random if random switch is on
+    if provider.nil? && reason == "weighted_enabled_but_total_weight_zero"
+      if ::MultiSmtpRouter.random_enabled?
+        list = ::MultiSmtpRouter.providers
+        if list.any?
+          provider = list.sample
+          reason = "weighted_total_zero_fallback_random"
+          ::MultiSmtpRouter.debug("uuid=#{uuid} #{reason} chosen_provider_id=#{provider[:id]}")
+        end
+      else
+        ::MultiSmtpRouter.warn("uuid=#{uuid} weighted enabled but total weight=0 and random disabled; default SMTP will be used")
+      end
+    end
+
     if provider
-      ::MultiSmtpRouter.debug("uuid=#{uuid} chose provider_id=#{provider[:id]} slot=#{provider[:slot]} reason=#{reason}")
+      ::MultiSmtpRouter.debug("uuid=#{uuid} chose provider_id=#{provider[:id]} slot=#{provider[:slot]} reason=#{reason} weight=#{provider[:weight_percent]}")
       ::MultiSmtpRouter.apply_provider!(message, provider)
       ::MultiSmtpRouter.debug(
         "uuid=#{uuid} applied provider_id=#{provider[:id]} from=#{provider[:from_address].inspect} reply_to=#{provider[:reply_to_address].inspect} " \
@@ -312,6 +369,7 @@ after_initialize do
         routing_reason: reason,
         chosen_provider_id: provider ? provider[:id].to_s : nil,
         chosen_provider_slot: provider ? provider[:slot].to_i : nil,
+        chosen_provider_weight: provider ? provider[:weight_percent].to_i : nil,
         chosen_from: provider ? provider[:from_address].to_s : nil,
         chosen_reply_to: provider ? provider[:reply_to_address].to_s : nil,
         delivery_settings_after: ::MultiSmtpRouter.safe_settings_snapshot(message&.delivery_method&.settings)
