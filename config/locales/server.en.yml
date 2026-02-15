@@ -1,8 +1,10 @@
+# config/locales/server.en.yml
 en:
   site_settings:
     multi_smtp_router_enabled: "Enable multi SMTP router"
     multi_smtp_router_debug_log_enabled: "Enable debug logs to Rails log"
-    multi_smtp_router_random_enabled: "Randomly choose among enabled providers"
+    multi_smtp_router_random_enabled: "Enable equal random among enabled providers"
+    multi_smtp_router_weighted_enabled: "Enable weighted provider selection (uses weight % per provider)"
     multi_smtp_router_domain_override_enabled: "Enable domain override routing"
     multi_smtp_router_domain_provider_pairs: "Domain→Provider pairs (list). Example: gmail.com=provider_X"
 
@@ -13,6 +15,7 @@ en:
 
     multi_smtp_router_p1_enabled: "Provider 1 enabled"
     multi_smtp_router_p1_id: "Provider 1 ID"
+    multi_smtp_router_p1_weight_percent: "Provider 1 weight percent (0-100)"
     multi_smtp_router_p1_from_address: "Provider 1 From address"
     multi_smtp_router_p1_reply_to_address: "Provider 1 Reply-To address"
     multi_smtp_router_p1_smtp_address: "Provider 1 SMTP host"
@@ -27,6 +30,7 @@ en:
 
     multi_smtp_router_p2_enabled: "Provider 2 enabled"
     multi_smtp_router_p2_id: "Provider 2 ID"
+    multi_smtp_router_p2_weight_percent: "Provider 2 weight percent (0-100)"
     multi_smtp_router_p2_from_address: "Provider 2 From address"
     multi_smtp_router_p2_reply_to_address: "Provider 2 Reply-To address"
     multi_smtp_router_p2_smtp_address: "Provider 2 SMTP host"
@@ -41,6 +45,7 @@ en:
 
     multi_smtp_router_p3_enabled: "Provider 3 enabled"
     multi_smtp_router_p3_id: "Provider 3 ID"
+    multi_smtp_router_p3_weight_percent: "Provider 3 weight percent (0-100)"
     multi_smtp_router_p3_from_address: "Provider 3 From address"
     multi_smtp_router_p3_reply_to_address: "Provider 3 Reply-To address"
     multi_smtp_router_p3_smtp_address: "Provider 3 SMTP host"
@@ -55,6 +60,7 @@ en:
 
     multi_smtp_router_p4_enabled: "Provider 4 enabled"
     multi_smtp_router_p4_id: "Provider 4 ID"
+    multi_smtp_router_p4_weight_percent: "Provider 4 weight percent (0-100)"
     multi_smtp_router_p4_from_address: "Provider 4 From address"
     multi_smtp_router_p4_reply_to_address: "Provider 4 Reply-To address"
     multi_smtp_router_p4_smtp_address: "Provider 4 SMTP host"
@@ -69,6 +75,7 @@ en:
 
     multi_smtp_router_p5_enabled: "Provider 5 enabled"
     multi_smtp_router_p5_id: "Provider 5 ID"
+    multi_smtp_router_p5_weight_percent: "Provider 5 weight percent (0-100)"
     multi_smtp_router_p5_from_address: "Provider 5 From address"
     multi_smtp_router_p5_reply_to_address: "Provider 5 Reply-To address"
     multi_smtp_router_p5_smtp_address: "Provider 5 SMTP host"
