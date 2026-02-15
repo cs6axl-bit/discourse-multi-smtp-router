@@ -1,10 +1,9 @@
 # frozen_string_literal: true
 
 # name: discourse-multi-smtp-router
-# about: Route outgoing emails through multiple SMTP providers (random among active, optional domain override), optionally override From/Reply-To per provider, optionally log routing to Discourse logs and/or an external endpoint asynchronously.
-# version: 1.0.0
+# about: Route outgoing emails through multiple SMTP providers (configured via site settings), random among enabled providers, optional domain->provider overrides, optional debug logs and async external logging.
+# version: 2.0.0
 # authors: you
-# url: https://github.com/YOURUSER/discourse-multi-smtp-router
 # required_version: 3.0.0
 
 enabled_site_setting :multi_smtp_router_enabled
@@ -18,7 +17,11 @@ after_initialize do
 
   module ::MultiSmtpRouter
     PLUGIN_NAME = "discourse-multi-smtp-router"
+    PROVIDER_SLOTS = 5
 
+    # --------------------
+    # Logging helpers
+    # --------------------
     def self.enabled?
       SiteSetting.multi_smtp_router_enabled
     end
@@ -27,47 +30,22 @@ after_initialize do
       SiteSetting.multi_smtp_router_debug_log_enabled
     end
 
-    def self.log_to_endpoint_enabled?
-      SiteSetting.multi_smtp_router_log_to_endpoint_enabled
-    end
-
     def self.debug(msg)
       return unless debug_enabled?
       Rails.logger.info("[#{PLUGIN_NAME}] #{msg}")
     rescue
-      # never fail
+      # never block sending
     end
 
     def self.warn(msg)
       Rails.logger.warn("[#{PLUGIN_NAME}] #{msg}")
     rescue
-      # never fail
+      # never block sending
     end
 
-    def self.read_timeout
-      (SiteSetting.multi_smtp_router_log_http_read_timeout || 3).to_i
-    end
-
-    def self.open_timeout
-      (SiteSetting.multi_smtp_router_log_http_open_timeout || 2).to_i
-    end
-
-    # ---------- Settings parsing ----------
-
-    def self.override_domains
-      # type: list => usually array; still normalize
-      v = SiteSetting.multi_smtp_router_override_domains
-      Array(v).map { |s| s.to_s.downcase.strip }.reject(&:empty?).uniq
-    rescue
-      []
-    end
-
-    def self.override_provider_id
-      SiteSetting.multi_smtp_router_override_provider_id.to_s.strip
-    rescue
-      ""
-    end
-
+    # --------------------
+    # Settings access
+    # --------------------
     def self.random_enabled?
       SiteSetting.multi_smtp_router_random_enabled
     end
@@ -76,45 +54,113 @@ after_initialize do
       SiteSetting.multi_smtp_router_domain_override_enabled
     end
 
-    def self.providers_raw_json
-      SiteSetting.multi_smtp_router_providers_json.to_s
+    def self.log_to_endpoint_enabled?
+      SiteSetting.multi_smtp_router_log_to_endpoint_enabled
     end
 
-    def self.parse_providers
-      raw = providers_raw_json.strip
-      return [] if raw.empty?
+    def self.log_endpoint_url
+      SiteSetting.multi_smtp_router_log_endpoint_url.to_s.strip
+    end
 
-      parsed = JSON.parse(raw)
-      return [] unless parsed.is_a?(Array)
+    def self.open_timeout
+      (SiteSetting.multi_smtp_router_log_http_open_timeout || 2).to_i
+    end
 
-      parsed.map do |p|
-        next unless p.is_a?(Hash)
+    def self.read_timeout
+      (SiteSetting.multi_smtp_router_log_http_read_timeout || 3).to_i
+    end
 
-        {
-          id: p["id"].to_s,
-          is_active: p["is_active"].to_i,
-          from_address: p["from_address"].to_s,
-          reply_to_address: p["reply_to_address"].to_s,
-          smtp: (p["smtp"].is_a?(Hash) ? p["smtp"] : {})
-        }
-      end.compact
+    # Domain->provider pairs stored as "domain=provider_id" (list setting)
+    def self.domain_provider_map
+      raw = Array(SiteSetting.multi_smtp_router_domain_provider_pairs)
+
+      map = {}
+      raw.each do |line|
+        s = line.to_s.strip
+        next if s.empty?
+
+        # accept: "gmail.com=provider_x" or "gmail.com>provider_x" or "gmail.com:provider_x"
+        if (m = s.match(/\A([^=:\s>]+)\s*(=|:|>)\s*([A-Za-z0-9_\-]+)\z/))
+          domain = m[1].downcase.strip
+          provider_id = m[3].strip
+          next if domain.empty? || provider_id.empty?
+          map[domain] = provider_id
+        end
+      end
+
+      map
     rescue => e
-      warn("providers_json parse failed: #{e.class}: #{e.message}")
-      []
+      warn("domain_provider_map parse failed: #{e.class}: #{e.message}")
+      {}
     end
 
-    def self.active_providers
-      parse_providers.select { |p| p[:is_active].to_i == 1 && p[:id].to_s.strip.length > 0 }
+    # --------------------
+    # Provider slots
+    # --------------------
+    def self.providers
+      out = []
+
+      (1..PROVIDER_SLOTS).each do |i|
+        begin
+          enabled = SiteSetting.public_send("multi_smtp_router_p#{i}_enabled")
+          next unless enabled
+
+          id = SiteSetting.public_send("multi_smtp_router_p#{i}_id").to_s.strip
+          next if id.empty?
+
+          from_addr = SiteSetting.public_send("multi_smtp_router_p#{i}_from_address").to_s.strip
+          reply_to  = SiteSetting.public_send("multi_smtp_router_p#{i}_reply_to_address").to_s.strip
+
+          smtp_address = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_address").to_s.strip
+          smtp_port    = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_port").to_i
+          smtp_user    = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_username").to_s
+          smtp_pass    = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_password").to_s
+          smtp_auth    = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_authentication_mode").to_s.strip
+
+          starttls_auto = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_enable_starttls_auto")
+          ssl           = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_ssl")
+          tls           = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_tls")
+          helo_domain   = SiteSetting.public_send("multi_smtp_router_p#{i}_smtp_domain").to_s.strip
+
+          smtp = {
+            address: smtp_address,
+            port: smtp_port
+          }
+
+          smtp[:user_name] = smtp_user unless smtp_user.to_s.empty?
+          smtp[:password] = smtp_pass unless smtp_pass.to_s.empty?
+          smtp[:authentication] = smtp_auth unless smtp_auth.empty?
+
+          # booleans only set if true (keeps defaults otherwise)
+          smtp[:enable_starttls_auto] = true if starttls_auto
+          smtp[:ssl] = true if ssl
+          smtp[:tls] = true if tls
+          smtp[:domain] = helo_domain unless helo_domain.empty?
+
+          out << {
+            slot: i,
+            id: id,
+            from_address: from_addr,
+            reply_to_address: reply_to,
+            smtp: smtp
+          }
+        rescue => e
+          warn("provider slot #{i} read failed: #{e.class}: #{e.message}")
+        end
+      end
+
+      out
     end
 
-    def self.find_provider(id)
+    def self.find_provider_by_id(id)
       want = id.to_s.strip
       return nil if want.empty?
-      parse_providers.find { |p| p[:id].to_s == want }
+      providers.find { |p| p[:id].to_s == want }
     end
 
-    # ---------- Mail helpers ----------
-
+    # --------------------
+    # Mail parsing
+    # --------------------
     def self.extract_recipient_domains(message)
       tos = Array(message&.to).compact
       tos.map do |addr|
@@ -127,48 +173,40 @@ after_initialize do
       end.compact.uniq
     end
 
-    def self.safe_settings_snapshot(delivery_settings)
-      h = (delivery_settings || {}).dup
-      # mask common secrets
-      if h.key?(:password)
-        h[:password] = "***"
-      end
-      if h.key?("password")
-        h["password"] = "***"
-      end
-      h
-    rescue
-      {}
-    end
-
+    # --------------------
+    # Routing decision
+    # --------------------
     def self.choose_provider(message)
-      active = active_providers
-      return [nil, "no_active_providers"] if active.empty?
+      list = providers
+      return [nil, "no_enabled_providers"] if list.empty?
 
       domains = extract_recipient_domains(message)
 
-      # Logic B: domain override (higher priority)
+      # Domain override: check each domain in message, first match wins
       if domain_override_enabled?
-        ods = override_domains
-        if !ods.empty? && domains.any? { |d| ods.include?(d) }
-          forced_id = override_provider_id
-          forced = find_provider(forced_id)
-          if forced && forced[:is_active].to_i == 1
-            return [forced, "domain_override"]
-          else
-            return [nil, "override_provider_missing_or_inactive"]
+        map = domain_provider_map
+        if !map.empty?
+          domains.each do |d|
+            pid = map[d]
+            next if pid.nil? || pid.to_s.strip.empty?
+            p = find_provider_by_id(pid)
+            return [p, "domain_override(#{d}->#{pid})"] if p
+            return [nil, "domain_override_provider_missing(#{d}->#{pid})"]
           end
         end
       end
 
-      # Logic A: random among active
+      # Random among enabled providers
       if random_enabled?
-        return [active.sample, "random_active"]
+        return [list.sample, "random_enabled"]
       end
 
       [nil, "no_routing_logic_enabled"]
     end
 
+    # --------------------
+    # Apply provider
+    # --------------------
     def self.apply_provider!(message, provider)
       return if message.nil? || provider.nil?
 
@@ -187,8 +225,22 @@ after_initialize do
       end
     end
 
+    def self.safe_settings_snapshot(delivery_settings)
+      h = (delivery_settings || {}).dup
+      if h.key?(:password)
+        h[:password] = "***"
+      end
+      h
+    rescue
+      {}
+    end
+
+    # --------------------
+    # Async external logging
+    # --------------------
     def self.enqueue_log(payload)
       return unless log_to_endpoint_enabled?
+      return if log_endpoint_url.empty?
       Jobs.enqueue(:multi_smtp_router_log, payload: payload)
     rescue => e
       warn("log enqueue failed: #{e.class}: #{e.message}")
@@ -196,7 +248,7 @@ after_initialize do
   end
 
   # ---------------------------
-  # Async logging job
+  # Sidekiq job to POST logs
   # ---------------------------
   module ::Jobs
     class MultiSmtpRouterLog < ::Jobs::Base
@@ -223,7 +275,7 @@ after_initialize do
   end
 
   # ---------------------------
-  # Main hook
+  # Main hook: never block sending
   # ---------------------------
   DiscourseEvent.on(:before_email_send) do |*params|
     next unless ::MultiSmtpRouter.enabled?
@@ -236,18 +288,17 @@ after_initialize do
 
     ::MultiSmtpRouter.debug("uuid=#{uuid} type=#{type} to=#{to_list.inspect} domains=#{domains.inspect}")
 
-    chosen_provider, reason = ::MultiSmtpRouter.choose_provider(message)
+    provider, reason = ::MultiSmtpRouter.choose_provider(message)
 
-    if chosen_provider
-      ::MultiSmtpRouter.debug("uuid=#{uuid} chose provider_id=#{chosen_provider[:id]} reason=#{reason}")
-      ::MultiSmtpRouter.apply_provider!(message, chosen_provider)
+    if provider
+      ::MultiSmtpRouter.debug("uuid=#{uuid} chose provider_id=#{provider[:id]} slot=#{provider[:slot]} reason=#{reason}")
+      ::MultiSmtpRouter.apply_provider!(message, provider)
       ::MultiSmtpRouter.debug(
-        "uuid=#{uuid} applied provider_id=#{chosen_provider[:id]} " \
-        "from=#{chosen_provider[:from_address].to_s.inspect} reply_to=#{chosen_provider[:reply_to_address].to_s.inspect} " \
+        "uuid=#{uuid} applied provider_id=#{provider[:id]} from=#{provider[:from_address].inspect} reply_to=#{provider[:reply_to_address].inspect} " \
         "settings_after=#{::MultiSmtpRouter.safe_settings_snapshot(message&.delivery_method&.settings).inspect}"
       )
     else
-      ::MultiSmtpRouter.debug("uuid=#{uuid} no provider chosen reason=#{reason} (leaving default SMTP)")
+      ::MultiSmtpRouter.debug("uuid=#{uuid} no provider chosen reason=#{reason} (default SMTP will be used)")
     end
 
     ::MultiSmtpRouter.enqueue_log(
@@ -259,9 +310,10 @@ after_initialize do
         to: to_list,
         recipient_domains: domains,
         routing_reason: reason,
-        chosen_provider_id: chosen_provider ? chosen_provider[:id].to_s : nil,
-        chosen_from: chosen_provider ? chosen_provider[:from_address].to_s : nil,
-        chosen_reply_to: chosen_provider ? chosen_provider[:reply_to_address].to_s : nil,
+        chosen_provider_id: provider ? provider[:id].to_s : nil,
+        chosen_provider_slot: provider ? provider[:slot].to_i : nil,
+        chosen_from: provider ? provider[:from_address].to_s : nil,
+        chosen_reply_to: provider ? provider[:reply_to_address].to_s : nil,
         delivery_settings_after: ::MultiSmtpRouter.safe_settings_snapshot(message&.delivery_method&.settings)
       }
     )
