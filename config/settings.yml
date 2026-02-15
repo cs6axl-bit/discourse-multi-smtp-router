@@ -1,3 +1,4 @@
+# config/settings.yml
 plugins:
   # =========================
   # GLOBAL
@@ -12,6 +13,10 @@ plugins:
 
   multi_smtp_router_random_enabled:
     default: true
+    client: false
+
+  multi_smtp_router_weighted_enabled:
+    default: false
     client: false
 
   multi_smtp_router_domain_override_enabled:
@@ -58,16 +63,22 @@ plugins:
     default: "provider_X"
     client: false
 
+  multi_smtp_router_p1_weight_percent:
+    default: 50
+    min: 0
+    max: 100
+    client: false
+
   multi_smtp_router_p1_from_address:
-    default: "My Site <noreply@myalt-sender.com>"
+    default: ""
     client: false
 
   multi_smtp_router_p1_reply_to_address:
-    default: "Support <support@myalt-sender.com>"
+    default: ""
     client: false
 
   multi_smtp_router_p1_smtp_address:
-    default: "smtp.example.com"
+    default: ""
     client: false
 
   multi_smtp_router_p1_smtp_port:
@@ -116,16 +127,22 @@ plugins:
     default: "provider_Y"
     client: false
 
+  multi_smtp_router_p2_weight_percent:
+    default: 50
+    min: 0
+    max: 100
+    client: false
+
   multi_smtp_router_p2_from_address:
-    default: "My Site <noreply@mysecond-sender.com>"
+    default: ""
     client: false
 
   multi_smtp_router_p2_reply_to_address:
-    default: "Support <support@mysecond-sender.com>"
+    default: ""
     client: false
 
   multi_smtp_router_p2_smtp_address:
-    default: "smtp.example.com"
+    default: ""
     client: false
 
   multi_smtp_router_p2_smtp_port:
@@ -172,6 +189,12 @@ plugins:
 
   multi_smtp_router_p3_id:
     default: "provider_A"
+    client: false
+
+  multi_smtp_router_p3_weight_percent:
+    default: 0
+    min: 0
+    max: 100
     client: false
 
   multi_smtp_router_p3_from_address:
@@ -232,6 +255,12 @@ plugins:
     default: "provider_B"
     client: false
 
+  multi_smtp_router_p4_weight_percent:
+    default: 0
+    min: 0
+    max: 100
+    client: false
+
   multi_smtp_router_p4_from_address:
     default: ""
     client: false
@@ -288,6 +317,12 @@ plugins:
 
   multi_smtp_router_p5_id:
     default: "provider_C"
+    client: false
+
+  multi_smtp_router_p5_weight_percent:
+    default: 0
+    min: 0
+    max: 100
     client: false
 
   multi_smtp_router_p5_from_address:
