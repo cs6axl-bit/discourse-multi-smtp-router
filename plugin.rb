@@ -2,7 +2,7 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging.
-# version: 2.2.0
+# version: 2.3.0
 # authors: you
 # required_version: 3.0.0
 
@@ -18,6 +18,13 @@ after_initialize do
   module ::MultiSmtpRouter
     PLUGIN_NAME = "discourse-multi-smtp-router"
     PROVIDER_SLOTS = 5
+
+    # Headers that other plugins (digest-report2) can read:
+    HDR_PROVIDER_ID     = "X-Multi-SMTP-Router-Provider-Id"
+    HDR_PROVIDER_SLOT   = "X-Multi-SMTP-Router-Provider-Slot"
+    HDR_PROVIDER_WEIGHT = "X-Multi-SMTP-Router-Provider-Weight"
+    HDR_ROUTING_REASON  = "X-Multi-SMTP-Router-Routing-Reason"
+    HDR_ROUTING_UUID    = "X-Multi-SMTP-Router-UUID"
 
     # --------------------
     # Logging helpers
@@ -105,7 +112,6 @@ after_initialize do
     # --------------------
     # Provider slots (UI-configured)
     # Each has: enabled, id, from, reply_to, smtp..., weight_percent
-    # Note: weight can be set even if provider disabled; it will be ignored because we only return enabled providers.
     # --------------------
     def self.providers
       out = []
@@ -183,10 +189,7 @@ after_initialize do
     end
 
     # --------------------
-    # Weighted selection (coin flip / cumulative)
-    # - Only uses enabled providers (incoming list)
-    # - Uses integer weights (0..100) per provider
-    # - If sum is 0 => returns nil
+    # Weighted selection
     # --------------------
     def self.choose_weighted_provider(list)
       weighted = list.select { |p| p[:weight_percent].to_i > 0 }
@@ -205,11 +208,6 @@ after_initialize do
 
     # --------------------
     # Routing decision
-    # Order:
-    #  1) domain override
-    #  2) weighted
-    #  3) equal random
-    #  4) none => default SMTP
     # --------------------
     def self.choose_provider(message)
       list = providers
@@ -238,7 +236,6 @@ after_initialize do
         if p
           return [p, "weighted(total=#{total})"]
         else
-          # Weights total zero across enabled providers
           return [nil, "weighted_enabled_but_total_weight_zero"]
         end
       end
@@ -276,6 +273,28 @@ after_initialize do
       h
     rescue
       {}
+    end
+
+    # Stamp provider decision onto message headers so other plugins can read it later
+    def self.stamp_headers!(message, uuid:, provider:, reason:)
+      return if message.nil?
+
+      message.header[HDR_ROUTING_UUID] = uuid.to_s
+
+      if provider
+        message.header[HDR_PROVIDER_ID]     = provider[:id].to_s
+        message.header[HDR_PROVIDER_SLOT]   = provider[:slot].to_i.to_s
+        message.header[HDR_PROVIDER_WEIGHT] = provider[:weight_percent].to_i.to_s
+      else
+        message.header[HDR_PROVIDER_ID]     = ""
+        message.header[HDR_PROVIDER_SLOT]   = ""
+        message.header[HDR_PROVIDER_WEIGHT] = ""
+      end
+
+      message.header[HDR_ROUTING_REASON] = reason.to_s
+      true
+    rescue
+      false
     end
 
     # --------------------
@@ -357,6 +376,9 @@ after_initialize do
     else
       ::MultiSmtpRouter.debug("uuid=#{uuid} no provider chosen reason=#{reason} (default SMTP will be used)")
     end
+
+    # IMPORTANT: stamp headers AFTER selection (and after fallback logic)
+    ::MultiSmtpRouter.stamp_headers!(message, uuid: uuid, provider: provider, reason: reason)
 
     ::MultiSmtpRouter.enqueue_log(
       {
