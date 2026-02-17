@@ -254,9 +254,43 @@ after_initialize do
     def self.apply_provider!(message, provider)
       return if message.nil? || provider.nil?
 
-      if provider[:from_address].to_s.strip.length > 0
-        message["From"] = provider[:from_address].to_s
+      # Preserve existing From display name; only swap the email address to provider's from_address email.
+      begin
+        existing_from_raw =
+          (message.header["From"] && message.header["From"].value.to_s.strip) ||
+          message["From"].to_s.strip
+
+        existing_name = nil
+        if existing_from_raw && !existing_from_raw.empty?
+          begin
+            existing_addr = Mail::Address.new(existing_from_raw)
+            existing_name = existing_addr.display_name.to_s.strip
+            existing_name = nil if existing_name.empty?
+          rescue
+            existing_name = nil
+          end
+        end
+
+        provider_from_raw = provider[:from_address].to_s.strip
+        if !provider_from_raw.empty?
+          provider_email = nil
+          begin
+            provider_addr = Mail::Address.new(provider_from_raw)
+            provider_email = provider_addr.address.to_s.strip
+            provider_email = nil if provider_email.empty?
+          rescue
+            provider_email = nil
+          end
+          provider_email ||= provider_from_raw
+
+          new_from = Mail::Address.new(provider_email)
+          new_from.display_name = existing_name if existing_name && !existing_name.empty?
+          message["From"] = new_from.format
+        end
+      rescue => e
+        warn("apply_provider From header update failed: #{e.class}: #{e.message}")
       end
+
       if provider[:reply_to_address].to_s.strip.length > 0
         message["Reply-To"] = provider[:reply_to_address].to_s
       end
