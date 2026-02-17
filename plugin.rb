@@ -17,7 +17,7 @@ after_initialize do
 
   module ::MultiSmtpRouter
     PLUGIN_NAME = "discourse-multi-smtp-router"
-    PROVIDER_SLOTS = 5
+    PROVIDER_SLOTS = 6
 
     # Headers that other plugins (digest-report2) can read:
     HDR_PROVIDER_ID     = "X-Multi-SMTP-Router-Provider-Id"
