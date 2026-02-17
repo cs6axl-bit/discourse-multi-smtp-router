@@ -2,7 +2,7 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table.
-# version: 2.4.0
+# version: 2.4.1
 # authors: you
 # required_version: 3.0.0
 
@@ -79,6 +79,26 @@ after_initialize do
       (SiteSetting.multi_smtp_router_domain_metrics_cache_ttl_seconds || 300).to_i
     rescue
       300
+    end
+
+    # NEW: % of times to skip metrics query and randomize across active providers
+    def self.domain_metrics_pre_random_percent
+      v = (SiteSetting.multi_smtp_router_domain_metrics_pre_random_percent || 10).to_i
+      v = 0 if v < 0
+      v = 100 if v > 100
+      v
+    rescue
+      10
+    end
+
+    # NEW: if metrics query returns ONLY ONE provider row, % of times to randomize across active providers instead
+    def self.domain_metrics_single_row_random_percent
+      v = (SiteSetting.multi_smtp_router_domain_metrics_single_row_random_percent || 0).to_i
+      v = 0 if v < 0
+      v = 100 if v > 100
+      v
+    rescue
+      0
     end
 
     def self.log_to_endpoint_enabled?
@@ -244,9 +264,6 @@ after_initialize do
 
       rows = []
       begin
-        # IMPORTANT:
-        # - domain is parameterized
-        # - we only select what we need
         sql = <<~SQL
           SELECT provider_id, open_percent, click_percent
           FROM #{METRICS_TABLE}
@@ -254,7 +271,6 @@ after_initialize do
         SQL
 
         res = DB.query(sql, domain: d)
-        # DB.query returns array of hashes in Discourse
         rows = Array(res).map do |r|
           {
             provider_id: r[:provider_id].to_s,
@@ -271,6 +287,17 @@ after_initialize do
       rows
     end
 
+    def self.percent_hit?(pct)
+      p = pct.to_i
+      p = 0 if p < 0
+      p = 100 if p > 100
+      return false if p <= 0
+      return true if p >= 100
+      rand(1..100) <= p
+    rescue
+      false
+    end
+
     def self.choose_provider_by_domain_metrics(message, list)
       # list = active providers (array of hashes with :id)
       domains = extract_recipient_domains(message)
@@ -278,6 +305,13 @@ after_initialize do
 
       # If multiple recipients with different domains, we try them in order and pick the first that yields rows.
       domains.each do |domain|
+        # NEW: pre-query randomization (skip DB query entirely)
+        pre_pct = domain_metrics_pre_random_percent
+        if percent_hit?(pre_pct)
+          chosen = list.sample
+          return [chosen, "metrics_pre_random(pct=#{pre_pct} domain=#{domain})"] if chosen
+        end
+
         rows = fetch_domain_metrics_rows(domain)
 
         # filter to providers that are currently active in this plugin
@@ -289,9 +323,25 @@ after_initialize do
           next
         end
 
+        # NEW: if only one provider returned, optionally randomize across active providers
+        if rows.length == 1
+          single_pct = domain_metrics_single_row_random_percent
+          if percent_hit?(single_pct) && list.length > 1
+            chosen = list.sample
+            return [chosen, "metrics_single_row_random(pct=#{single_pct} domain=#{domain} only=#{rows[0][:provider_id]})"] if chosen
+          end
+
+          provider = find_provider_by_id(rows[0][:provider_id])
+          if provider
+            return [provider, "metrics_single_row(domain=#{domain} provider_id=#{provider[:id]})"]
+          else
+            warn("metrics single row provider_id=#{rows[0][:provider_id]} but provider not active anymore")
+            next
+          end
+        end
+
         # Rank: click_percent (primary) then open_percent (secondary)
         rows_sorted = rows.sort_by do |r|
-          # negative for descending
           [-r[:click_percent].to_f, -r[:open_percent].to_f]
         end
 
@@ -307,14 +357,14 @@ after_initialize do
           reason = "metrics_top50(domain=#{domain} top_n=#{top_n} total=#{rows_sorted.length})"
           return [provider, reason]
         else
-          # should not happen because we filtered to active_ids, but keep safe
           warn("metrics chose provider_id=#{chosen[:provider_id]} but provider not active anymore")
         end
       end
 
       # No domain hit -> random among all active providers
       if list.any?
-        return [list.sample, "metrics_domain_not_found_fallback_random_all"]
+        p = list.sample
+        return [p, "metrics_domain_not_found_fallback_random_all"] if p
       end
 
       [nil, "metrics_no_active_providers"]
@@ -347,14 +397,10 @@ after_initialize do
         end
       end
 
-      # 2) NEW: Metrics-based routing per domain
+      # 2) Metrics-based routing per domain
       if domain_metrics_enabled?
         p, reason = choose_provider_by_domain_metrics(message, list)
         return [p, reason] if p
-        # if p nil, we continue to other modes (weighted/random) unless the reason already randomized
-        if reason == "metrics_domain_not_found_fallback_random_all"
-          return [p, reason] # (p is non-nil in that branch, but keep structure)
-        end
         debug("metrics enabled but did not select provider; continuing to other modes reason=#{reason}")
       end
 
