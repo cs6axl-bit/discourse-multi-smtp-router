@@ -454,3 +454,17 @@ plugins:
   multi_smtp_router_p6_smtp_domain:
     default: ""
     client: false
+    
+  multi_smtp_router_domain_metrics_pre_random_percent:
+    default: 10
+    min: 0
+    max: 100
+    client: true
+    type: integer
+
+  multi_smtp_router_domain_metrics_single_row_random_percent:
+    default: 0
+    min: 0
+    max: 100
+    client: true
+    type: integer
