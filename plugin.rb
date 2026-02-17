@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # name: discourse-multi-smtp-router
-# about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging.
-# version: 2.3.0
+# about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table.
+# version: 2.4.0
 # authors: you
 # required_version: 3.0.0
 
@@ -25,6 +25,8 @@ after_initialize do
     HDR_PROVIDER_WEIGHT = "X-Multi-SMTP-Router-Provider-Weight"
     HDR_ROUTING_REASON  = "X-Multi-SMTP-Router-Routing-Reason"
     HDR_ROUTING_UUID    = "X-Multi-SMTP-Router-UUID"
+
+    METRICS_TABLE = "public.digest_provider_domain_metrics"
 
     # --------------------
     # Logging helpers
@@ -63,6 +65,20 @@ after_initialize do
 
     def self.weighted_enabled?
       SiteSetting.multi_smtp_router_weighted_enabled
+    end
+
+    # NEW: metrics-based routing switch
+    def self.domain_metrics_enabled?
+      SiteSetting.multi_smtp_router_domain_metrics_enabled
+    rescue
+      false
+    end
+
+    # NEW: cache TTL seconds for per-domain metrics lookup
+    def self.domain_metrics_cache_ttl
+      (SiteSetting.multi_smtp_router_domain_metrics_cache_ttl_seconds || 300).to_i
+    rescue
+      300
     end
 
     def self.log_to_endpoint_enabled?
@@ -207,6 +223,107 @@ after_initialize do
     end
 
     # --------------------
+    # NEW: Metrics-based selection per domain
+    # --------------------
+    def self.domain_metrics_cache
+      # { "gmail.com" => { at: Time, rows: [...] } }
+      @domain_metrics_cache ||= {}
+    end
+
+    def self.fetch_domain_metrics_rows(domain)
+      d = domain.to_s.downcase.strip
+      return [] if d.empty?
+
+      ttl = domain_metrics_cache_ttl
+      now = Time.now.to_i
+
+      cached = domain_metrics_cache[d]
+      if cached && cached[:expires_at].to_i > now
+        return cached[:rows] || []
+      end
+
+      rows = []
+      begin
+        # IMPORTANT:
+        # - domain is parameterized
+        # - we only select what we need
+        sql = <<~SQL
+          SELECT provider_id, open_percent, click_percent
+          FROM #{METRICS_TABLE}
+          WHERE email_domain = :domain
+        SQL
+
+        res = DB.query(sql, domain: d)
+        # DB.query returns array of hashes in Discourse
+        rows = Array(res).map do |r|
+          {
+            provider_id: r[:provider_id].to_s,
+            open_percent: (r[:open_percent] || 0).to_f,
+            click_percent: (r[:click_percent] || 0).to_f
+          }
+        end
+      rescue => e
+        warn("metrics lookup failed domain=#{d}: #{e.class}: #{e.message}")
+        rows = []
+      end
+
+      domain_metrics_cache[d] = { expires_at: now + ttl, rows: rows }
+      rows
+    end
+
+    def self.choose_provider_by_domain_metrics(message, list)
+      # list = active providers (array of hashes with :id)
+      domains = extract_recipient_domains(message)
+      return [nil, "metrics_no_recipient_domain"] if domains.empty?
+
+      # If multiple recipients with different domains, we try them in order and pick the first that yields rows.
+      domains.each do |domain|
+        rows = fetch_domain_metrics_rows(domain)
+
+        # filter to providers that are currently active in this plugin
+        active_ids = list.map { |p| p[:id].to_s }
+        rows = rows.select { |r| active_ids.include?(r[:provider_id].to_s) }
+
+        if rows.empty?
+          debug("metrics domain=#{domain} no rows for active providers")
+          next
+        end
+
+        # Rank: click_percent (primary) then open_percent (secondary)
+        rows_sorted = rows.sort_by do |r|
+          # negative for descending
+          [-r[:click_percent].to_f, -r[:open_percent].to_f]
+        end
+
+        # Top 50% (ceil). Ensure at least 1.
+        top_n = (rows_sorted.length / 2.0).ceil
+        top_n = 1 if top_n < 1
+
+        top_rows = rows_sorted.first(top_n)
+        chosen = top_rows.sample
+
+        provider = find_provider_by_id(chosen[:provider_id])
+        if provider
+          reason = "metrics_top50(domain=#{domain} top_n=#{top_n} total=#{rows_sorted.length})"
+          return [provider, reason]
+        else
+          # should not happen because we filtered to active_ids, but keep safe
+          warn("metrics chose provider_id=#{chosen[:provider_id]} but provider not active anymore")
+        end
+      end
+
+      # No domain hit -> random among all active providers
+      if list.any?
+        return [list.sample, "metrics_domain_not_found_fallback_random_all"]
+      end
+
+      [nil, "metrics_no_active_providers"]
+    rescue => e
+      warn("choose_provider_by_domain_metrics failed: #{e.class}: #{e.message}")
+      [nil, "metrics_exception_fallback"]
+    end
+
+    # --------------------
     # Routing decision
     # --------------------
     def self.choose_provider(message)
@@ -230,7 +347,18 @@ after_initialize do
         end
       end
 
-      # 2) Weighted mode
+      # 2) NEW: Metrics-based routing per domain
+      if domain_metrics_enabled?
+        p, reason = choose_provider_by_domain_metrics(message, list)
+        return [p, reason] if p
+        # if p nil, we continue to other modes (weighted/random) unless the reason already randomized
+        if reason == "metrics_domain_not_found_fallback_random_all"
+          return [p, reason] # (p is non-nil in that branch, but keep structure)
+        end
+        debug("metrics enabled but did not select provider; continuing to other modes reason=#{reason}")
+      end
+
+      # 3) Weighted mode
       if weighted_enabled?
         p, total = choose_weighted_provider(list)
         if p
@@ -240,7 +368,7 @@ after_initialize do
         end
       end
 
-      # 3) Equal random
+      # 4) Equal random
       if random_enabled?
         return [list.sample, "random_enabled"]
       end
