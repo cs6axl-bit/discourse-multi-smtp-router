@@ -23,6 +23,24 @@ plugins:
     default: true
     client: false
 
+  # NEW: Route by per-domain metrics from Postgres table public.digest_provider_domain_metrics
+  # If enabled, after domain override it will:
+  # - look up domain in the metrics table
+  # - rank by click_percent then open_percent
+  # - choose randomly among top 50% providers
+  # - if no row for that domain: random among all active providers
+  multi_smtp_router_domain_metrics_enabled:
+    default: false
+    client: false
+
+  # NEW: Per-process in-memory cache TTL for metrics lookups (seconds)
+  # 0 = disable cache (query Postgres each time)
+  multi_smtp_router_domain_metrics_cache_ttl_seconds:
+    default: 300
+    min: 0
+    max: 3600
+    client: false
+
   # List entries like:
   # gmail.com=provider_X
   # yahoo.com=provider_Y
