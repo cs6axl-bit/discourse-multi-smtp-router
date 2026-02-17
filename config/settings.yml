@@ -23,24 +23,6 @@ plugins:
     default: true
     client: false
 
-  # NEW: Route by per-domain metrics from Postgres table public.digest_provider_domain_metrics
-  # If enabled, after domain override it will:
-  # - look up domain in the metrics table
-  # - rank by click_percent then open_percent
-  # - choose randomly among top 50% providers
-  # - if no row for that domain: random among all active providers
-  multi_smtp_router_domain_metrics_enabled:
-    default: false
-    client: false
-
-  # NEW: Per-process in-memory cache TTL for metrics lookups (seconds)
-  # 0 = disable cache (query Postgres each time)
-  multi_smtp_router_domain_metrics_cache_ttl_seconds:
-    default: 300
-    min: 0
-    max: 3600
-    client: false
-
   # List entries like:
   # gmail.com=provider_X
   # yahoo.com=provider_Y
@@ -387,5 +369,69 @@ plugins:
     client: false
 
   multi_smtp_router_p5_smtp_domain:
+    default: ""
+    client: false
+
+  # =========================
+  # PROVIDER 6
+  # =========================
+  multi_smtp_router_p6_enabled:
+    default: false
+    client: false
+
+  multi_smtp_router_p6_id:
+    default: "provider_D"
+    client: false
+
+  multi_smtp_router_p6_weight_percent:
+    default: 0
+    min: 0
+    max: 100
+    client: false
+
+  multi_smtp_router_p6_from_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p6_reply_to_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p6_smtp_address:
+    default: ""
+    client: false
+
+  multi_smtp_router_p6_smtp_port:
+    default: 587
+    min: 0
+    max: 65535
+    client: false
+
+  multi_smtp_router_p6_smtp_username:
+    default: ""
+    client: false
+
+  multi_smtp_router_p6_smtp_password:
+    default: ""
+    secret: true
+    client: false
+
+  multi_smtp_router_p6_smtp_authentication_mode:
+    default: "plain"
+    client: false
+
+  multi_smtp_router_p6_smtp_enable_starttls_auto:
+    default: true
+    client: false
+
+  multi_smtp_router_p6_smtp_ssl:
+    default: false
+    client: false
+
+  multi_smtp_router_p6_smtp_tls:
+    default: false
+    client: false
+
+  multi_smtp_router_p6_smtp_domain:
     default: ""
     client: false
