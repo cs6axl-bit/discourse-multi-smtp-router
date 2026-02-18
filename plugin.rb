@@ -2,7 +2,7 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table.
-# version: 2.4.2
+# version: 2.4.3
 # authors: you
 # required_version: 3.0.0
 
@@ -39,15 +39,52 @@ after_initialize do
       SiteSetting.multi_smtp_router_debug_log_enabled
     end
 
-    def self.debug(msg)
-      return unless debug_enabled?
-      Rails.logger.info("[#{PLUGIN_NAME}] #{msg}")
+    # OPTIONAL: if you add this SiteSetting in settings.yml, debug can also go to /admin/logs (Errors)
+    def self.debug_to_errors_enabled?
+      SiteSetting.respond_to?(:multi_smtp_router_debug_to_errors_log) &&
+        SiteSetting.multi_smtp_router_debug_to_errors_log
+    rescue
+      false
+    end
+
+    # OPTIONAL: if you add this SiteSetting in settings.yml, warn() will also go to /admin/logs (Errors)
+    def self.log_to_errors_enabled?
+      SiteSetting.respond_to?(:multi_smtp_router_log_to_errors_log) &&
+        SiteSetting.multi_smtp_router_log_to_errors_log
+    rescue
+      true
+      # NOTE: defaulting to true is intentional for your request:
+      # "I want it to log to the errors log".
+      # If you don't want that default, change this to false.
+    end
+
+    # Send message to Admin -> Logs -> Errors (Discourse exception log)
+    # This is what shows up in https://<site>/admin/logs (Errors)
+    def self.error_log(msg, extra: nil, exception: nil)
+      e = exception || RuntimeError.new(msg.to_s)
+
+      Discourse.warn_exception(
+        e,
+        message: "[#{PLUGIN_NAME}] #{msg}",
+        env: (extra.is_a?(Hash) ? extra : nil)
+      )
     rescue
       # never block sending
     end
 
-    def self.warn(msg)
-      Rails.logger.warn("[#{PLUGIN_NAME}] #{msg}")
+    def self.debug(msg)
+      return unless debug_enabled?
+      Rails.logger.info("[#{PLUGIN_NAME}] #{msg}")
+      error_log("DEBUG: #{msg}") if debug_to_errors_enabled?
+    rescue
+      # never block sending
+    end
+
+    def self.warn(msg, extra: nil, exception: nil)
+      Rails.logger.warn("[#{PLUGIN_NAME}] #{msg}") rescue nil
+      if log_to_errors_enabled?
+        error_log(msg, extra: extra, exception: exception)
+      end
     rescue
       # never block sending
     end
@@ -141,7 +178,7 @@ after_initialize do
 
       map
     rescue => e
-      warn("domain_provider_map parse failed: #{e.class}: #{e.message}")
+      warn("domain_provider_map parse failed: #{e.class}: #{e.message}", exception: e)
       {}
     end
 
@@ -196,7 +233,7 @@ after_initialize do
             smtp: smtp
           }
         rescue => e
-          warn("provider slot #{i} read failed: #{e.class}: #{e.message}")
+          warn("provider slot #{i} read failed: #{e.class}: #{e.message}", exception: e)
         end
       end
 
@@ -243,7 +280,7 @@ after_initialize do
     end
 
     # --------------------
-    # NEW: Metrics-based selection per domain
+    # Metrics-based selection per domain
     # --------------------
     def self.domain_metrics_cache
       # { "gmail.com" => { expires_at: TimeInt, rows: [...] } }
@@ -270,10 +307,8 @@ after_initialize do
           WHERE email_domain = ?
         SQL
 
-        # Force top-level DB constant (avoid namespace weirdness)
         res = ::DB.query(sql, d)
 
-        # EXTRA DEBUG (first 200 chars)
         begin
           debug("metrics raw domain=#{d} class=#{res.class} sample=#{res.inspect.to_s[0,200]}")
         rescue
@@ -286,7 +321,6 @@ after_initialize do
           elsif res.is_a?(Hash)
             [res]
           elsif (res.is_a?(Class) || res.is_a?(Module))
-            # Critical: Class/Module respond_to?(:to_a) but is NOT rows.
             warn("metrics lookup returned #{res.class} (not rows) domain=#{d}")
             []
           elsif res.respond_to?(:to_a)
@@ -297,7 +331,6 @@ after_initialize do
             []
           end
 
-        # Only keep hash-like rows
         ary.each do |r|
           next unless r.respond_to?(:[])
 
@@ -311,14 +344,13 @@ after_initialize do
           }
         end
 
-        # EXTRA DEBUG: parsed rows summary
         begin
           debug("metrics parsed domain=#{d} rows=#{rows.length} provider_ids=#{rows.map { |x| x[:provider_id] }.uniq.inspect}")
         rescue
           # ignore
         end
       rescue => e
-        warn("metrics lookup failed domain=#{d}: #{e.class}: #{e.message}")
+        warn("metrics lookup failed domain=#{d}: #{e.class}: #{e.message}", exception: e)
         rows = []
       end
 
@@ -338,13 +370,10 @@ after_initialize do
     end
 
     def self.choose_provider_by_domain_metrics(message, list)
-      # list = active providers (array of hashes with :id)
       domains = extract_recipient_domains(message)
       return [nil, "metrics_no_recipient_domain"] if domains.empty?
 
-      # If multiple recipients with different domains, try in order and pick first that yields rows.
       domains.each do |domain|
-        # pre-query randomization (skip DB query entirely)
         pre_pct = domain_metrics_pre_random_percent
         if percent_hit?(pre_pct)
           chosen = list.sample
@@ -353,7 +382,6 @@ after_initialize do
 
         rows = fetch_domain_metrics_rows(domain)
 
-        # filter to providers that are currently active in this plugin
         active_ids = list.map { |p| p[:id].to_s }
         rows = rows.select { |r| active_ids.include?(r[:provider_id].to_s) }
 
@@ -362,7 +390,6 @@ after_initialize do
           next
         end
 
-        # if only one provider returned, optionally randomize across active providers
         if rows.length == 1
           single_pct = domain_metrics_single_row_random_percent
           if percent_hit?(single_pct) && list.length > 1
@@ -379,12 +406,8 @@ after_initialize do
           end
         end
 
-        # Rank: click_percent (primary) then open_percent (secondary)
-        rows_sorted = rows.sort_by do |r|
-          [-r[:click_percent].to_f, -r[:open_percent].to_f]
-        end
+        rows_sorted = rows.sort_by { |r| [-r[:click_percent].to_f, -r[:open_percent].to_f] }
 
-        # Top 50% (ceil). Ensure at least 1.
         top_n = (rows_sorted.length / 2.0).ceil
         top_n = 1 if top_n < 1
 
@@ -400,7 +423,6 @@ after_initialize do
         end
       end
 
-      # No domain hit -> random among all active providers
       if list.any?
         p = list.sample
         return [p, "metrics_domain_not_found_fallback_random_all"] if p
@@ -408,7 +430,7 @@ after_initialize do
 
       [nil, "metrics_no_active_providers"]
     rescue => e
-      warn("choose_provider_by_domain_metrics failed: #{e.class}: #{e.message}")
+      warn("choose_provider_by_domain_metrics failed: #{e.class}: #{e.message}", exception: e)
       [nil, "metrics_exception_fallback"]
     end
 
@@ -467,7 +489,6 @@ after_initialize do
     def self.apply_provider!(message, provider)
       return if message.nil? || provider.nil?
 
-      # Preserve existing From display name; only swap the email address to provider's from_address email.
       begin
         existing_from_raw =
           (message.header["From"] && message.header["From"].value.to_s.strip) ||
@@ -501,7 +522,7 @@ after_initialize do
           message["From"] = new_from.format
         end
       rescue => e
-        warn("apply_provider From header update failed: #{e.class}: #{e.message}")
+        warn("apply_provider From header update failed: #{e.class}: #{e.message}", exception: e)
       end
 
       if provider[:reply_to_address].to_s.strip.length > 0
@@ -522,7 +543,6 @@ after_initialize do
       {}
     end
 
-    # Stamp provider decision onto message headers so other plugins can read it later
     def self.stamp_headers!(message, uuid:, provider:, reason:)
       return if message.nil?
 
@@ -552,7 +572,7 @@ after_initialize do
       return if log_endpoint_url.empty?
       Jobs.enqueue(:multi_smtp_router_log, payload: payload)
     rescue => e
-      warn("log enqueue failed: #{e.class}: #{e.message}")
+      warn("log enqueue failed: #{e.class}: #{e.message}", exception: e)
     end
   end
 
@@ -578,7 +598,7 @@ after_initialize do
 
         http.request(req)
       rescue => e
-        ::MultiSmtpRouter.warn("log post failed: #{e.class}: #{e.message}")
+        ::MultiSmtpRouter.warn("log post failed: #{e.class}: #{e.message}", exception: e)
       end
     end
   end
@@ -624,7 +644,6 @@ after_initialize do
       ::MultiSmtpRouter.debug("uuid=#{uuid} no provider chosen reason=#{reason} (default SMTP will be used)")
     end
 
-    # IMPORTANT: stamp headers AFTER selection (and after fallback logic)
     ::MultiSmtpRouter.stamp_headers!(message, uuid: uuid, provider: provider, reason: reason)
 
     ::MultiSmtpRouter.enqueue_log(
@@ -645,6 +664,6 @@ after_initialize do
       }
     )
   rescue => e
-    ::MultiSmtpRouter.warn("before_email_send failed: #{e.class}: #{e.message}")
+    ::MultiSmtpRouter.warn("before_email_send failed: #{e.class}: #{e.message}", exception: e)
   end
 end
