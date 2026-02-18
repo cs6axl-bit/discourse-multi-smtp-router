@@ -267,21 +267,34 @@ after_initialize do
         sql = <<~SQL
           SELECT provider_id, open_percent, click_percent
           FROM #{METRICS_TABLE}
-          WHERE email_domain = :domain
+          WHERE email_domain = ?
         SQL
 
-        res = DB.query(sql, domain: d)
-        rows = Array(res).map do |r|
+        res = DB.query(sql, d)
+
+        ary =
+          if res.is_a?(Array)
+            res
+          elsif res.respond_to?(:to_a)
+            res.to_a
+          else
+            ::MultiSmtpRouter.warn("metrics lookup unexpected result class=#{res.class} domain=#{d}")
+            []
+          end
+
+        rows = ary.map do |r|
+          pid = (r[:provider_id] || r["provider_id"]).to_s
           {
-            provider_id: r[:provider_id].to_s,
-            open_percent: (r[:open_percent] || 0).to_f,
-            click_percent: (r[:click_percent] || 0).to_f
+            provider_id: pid,
+            open_percent: (r[:open_percent] || r["open_percent"] || 0).to_f,
+            click_percent: (r[:click_percent] || r["click_percent"] || 0).to_f
           }
         end
       rescue => e
         warn("metrics lookup failed domain=#{d}: #{e.class}: #{e.message}")
         rows = []
       end
+
 
       domain_metrics_cache[d] = { expires_at: now + ttl, rows: rows }
       rows
