@@ -2,7 +2,7 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table.
-# version: 2.4.1
+# version: 2.4.2
 # authors: you
 # required_version: 3.0.0
 
@@ -246,7 +246,7 @@ after_initialize do
     # NEW: Metrics-based selection per domain
     # --------------------
     def self.domain_metrics_cache
-      # { "gmail.com" => { at: Time, rows: [...] } }
+      # { "gmail.com" => { expires_at: TimeInt, rows: [...] } }
       @domain_metrics_cache ||= {}
     end
 
@@ -270,31 +270,57 @@ after_initialize do
           WHERE email_domain = ?
         SQL
 
-        res = DB.query(sql, d)
+        # Force top-level DB constant (avoid namespace weirdness)
+        res = ::DB.query(sql, d)
+
+        # EXTRA DEBUG (first 200 chars)
+        begin
+          debug("metrics raw domain=#{d} class=#{res.class} sample=#{res.inspect.to_s[0,200]}")
+        rescue
+          # ignore
+        end
 
         ary =
           if res.is_a?(Array)
             res
+          elsif res.is_a?(Hash)
+            [res]
+          elsif (res.is_a?(Class) || res.is_a?(Module))
+            # Critical: Class/Module respond_to?(:to_a) but is NOT rows.
+            warn("metrics lookup returned #{res.class} (not rows) domain=#{d}")
+            []
           elsif res.respond_to?(:to_a)
-            res.to_a
+            tmp = res.to_a
+            tmp.is_a?(Array) ? tmp : []
           else
-            ::MultiSmtpRouter.warn("metrics lookup unexpected result class=#{res.class} domain=#{d}")
+            warn("metrics lookup unexpected result class=#{res.class} domain=#{d}")
             []
           end
 
-        rows = ary.map do |r|
-          pid = (r[:provider_id] || r["provider_id"]).to_s
-          {
+        # Only keep hash-like rows
+        ary.each do |r|
+          next unless r.respond_to?(:[])
+
+          pid = (r[:provider_id] || r["provider_id"]).to_s.strip
+          next if pid.empty?
+
+          rows << {
             provider_id: pid,
-            open_percent: (r[:open_percent] || r["open_percent"] || 0).to_f,
+            open_percent:  (r[:open_percent]  || r["open_percent"]  || 0).to_f,
             click_percent: (r[:click_percent] || r["click_percent"] || 0).to_f
           }
+        end
+
+        # EXTRA DEBUG: parsed rows summary
+        begin
+          debug("metrics parsed domain=#{d} rows=#{rows.length} provider_ids=#{rows.map { |x| x[:provider_id] }.uniq.inspect}")
+        rescue
+          # ignore
         end
       rescue => e
         warn("metrics lookup failed domain=#{d}: #{e.class}: #{e.message}")
         rows = []
       end
-
 
       domain_metrics_cache[d] = { expires_at: now + ttl, rows: rows }
       rows
@@ -316,9 +342,9 @@ after_initialize do
       domains = extract_recipient_domains(message)
       return [nil, "metrics_no_recipient_domain"] if domains.empty?
 
-      # If multiple recipients with different domains, we try them in order and pick the first that yields rows.
+      # If multiple recipients with different domains, try in order and pick first that yields rows.
       domains.each do |domain|
-        # NEW: pre-query randomization (skip DB query entirely)
+        # pre-query randomization (skip DB query entirely)
         pre_pct = domain_metrics_pre_random_percent
         if percent_hit?(pre_pct)
           chosen = list.sample
@@ -336,7 +362,7 @@ after_initialize do
           next
         end
 
-        # NEW: if only one provider returned, optionally randomize across active providers
+        # if only one provider returned, optionally randomize across active providers
         if rows.length == 1
           single_pct = domain_metrics_single_row_random_percent
           if percent_hit?(single_pct) && list.length > 1
