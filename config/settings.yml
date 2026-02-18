@@ -468,3 +468,11 @@ plugins:
     max: 100
     client: true
     type: integer
+
+plugins:
+  multi_smtp_router_log_to_errors_log:
+    default: true
+    client: false
+  multi_smtp_router_debug_to_errors_log:
+    default: false
+    client: false
