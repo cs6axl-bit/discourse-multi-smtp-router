@@ -11,6 +11,16 @@ plugins:
     default: false
     client: false
 
+  # Logster (/admin/logs) prefers WARN/ERROR; our plugin uses Rails.logger.warn for debug too,
+  # so these are mostly legacy toggles now, but keep them for compatibility:
+  multi_smtp_router_log_to_errors_log:
+    default: true
+    client: false
+
+  multi_smtp_router_debug_to_errors_log:
+    default: false
+    client: false
+
   multi_smtp_router_random_enabled:
     default: true
     client: false
@@ -23,34 +33,50 @@ plugins:
     default: true
     client: false
 
-  # NEW: Route by per-domain metrics from Postgres table public.digest_provider_domain_metrics
-  # If enabled, after domain override it will:
-  # - look up domain in the metrics table
-  # - rank by click_percent then open_percent
-  # - choose randomly among top 50% providers
-  # - if no row for that domain: random among all active providers
+  # Domain override list entries like:
+  # gmail.com=provider_X
+  # yahoo.com=provider_Y
+  multi_smtp_router_domain_provider_pairs:
+    type: list
+    default: ""
+    client: false
+
+  # =========================
+  # METRICS-BASED ROUTING
+  # =========================
+  # Uses Postgres table public.digest_provider_domain_metrics
   multi_smtp_router_domain_metrics_enabled:
     default: false
     client: false
 
-  # NEW: Per-process in-memory cache TTL for metrics lookups (seconds)
-  # 25 minutes = 1500
-  # 0 = disable cache (query Postgres each time)
+  # Per-process in-memory cache TTL for metrics lookups (seconds)
+  # 0 = disable cache
   multi_smtp_router_domain_metrics_cache_ttl_seconds:
     default: 1500
     min: 0
     max: 3600
     client: false
+    type: integer
 
-  # List entries like:
-  # gmail.com=provider_X
-  # yahoo.com=provider_Y
-  multi_smtp_router_domain_provider_pairs:
-    type: list
-    default: "gmail.com=provider_X|yahoo.com=provider_Y"
+  # % of times to skip metrics query and randomize across active providers
+  multi_smtp_router_domain_metrics_pre_random_percent:
+    default: 10
+    min: 0
+    max: 100
     client: false
+    type: integer
 
-  # External log (async)
+  # If metrics query returns ONLY ONE provider row, % of times to randomize across active providers instead
+  multi_smtp_router_domain_metrics_single_row_random_percent:
+    default: 0
+    min: 0
+    max: 100
+    client: false
+    type: integer
+
+  # =========================
+  # EXTERNAL LOG (ASYNC)
+  # =========================
   multi_smtp_router_log_to_endpoint_enabled:
     default: false
     client: false
@@ -64,12 +90,14 @@ plugins:
     min: 0
     max: 60
     client: false
+    type: integer
 
   multi_smtp_router_log_http_read_timeout:
     default: 3
     min: 0
     max: 60
     client: false
+    type: integer
 
   # =========================
   # PROVIDER 1
@@ -87,6 +115,7 @@ plugins:
     min: 0
     max: 100
     client: false
+    type: integer
 
   multi_smtp_router_p1_from_address:
     default: ""
@@ -105,6 +134,7 @@ plugins:
     min: 0
     max: 65535
     client: false
+    type: integer
 
   multi_smtp_router_p1_smtp_username:
     default: ""
@@ -151,6 +181,7 @@ plugins:
     min: 0
     max: 100
     client: false
+    type: integer
 
   multi_smtp_router_p2_from_address:
     default: ""
@@ -169,6 +200,7 @@ plugins:
     min: 0
     max: 65535
     client: false
+    type: integer
 
   multi_smtp_router_p2_smtp_username:
     default: ""
@@ -215,6 +247,7 @@ plugins:
     min: 0
     max: 100
     client: false
+    type: integer
 
   multi_smtp_router_p3_from_address:
     default: ""
@@ -233,6 +266,7 @@ plugins:
     min: 0
     max: 65535
     client: false
+    type: integer
 
   multi_smtp_router_p3_smtp_username:
     default: ""
@@ -279,6 +313,7 @@ plugins:
     min: 0
     max: 100
     client: false
+    type: integer
 
   multi_smtp_router_p4_from_address:
     default: ""
@@ -297,6 +332,7 @@ plugins:
     min: 0
     max: 65535
     client: false
+    type: integer
 
   multi_smtp_router_p4_smtp_username:
     default: ""
@@ -343,6 +379,7 @@ plugins:
     min: 0
     max: 100
     client: false
+    type: integer
 
   multi_smtp_router_p5_from_address:
     default: ""
@@ -361,6 +398,7 @@ plugins:
     min: 0
     max: 65535
     client: false
+    type: integer
 
   multi_smtp_router_p5_smtp_username:
     default: ""
@@ -407,6 +445,7 @@ plugins:
     min: 0
     max: 100
     client: false
+    type: integer
 
   multi_smtp_router_p6_from_address:
     default: ""
@@ -425,6 +464,7 @@ plugins:
     min: 0
     max: 65535
     client: false
+    type: integer
 
   multi_smtp_router_p6_smtp_username:
     default: ""
@@ -453,26 +493,4 @@ plugins:
 
   multi_smtp_router_p6_smtp_domain:
     default: ""
-    client: false
-    
-  multi_smtp_router_domain_metrics_pre_random_percent:
-    default: 10
-    min: 0
-    max: 100
-    client: true
-    type: integer
-
-  multi_smtp_router_domain_metrics_single_row_random_percent:
-    default: 0
-    min: 0
-    max: 100
-    client: true
-    type: integer
-
-plugins:
-  multi_smtp_router_log_to_errors_log:
-    default: true
-    client: false
-  multi_smtp_router_debug_to_errors_log:
-    default: false
     client: false
