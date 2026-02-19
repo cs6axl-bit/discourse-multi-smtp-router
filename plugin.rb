@@ -2,7 +2,7 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table.
-# version: 2.4.7
+# version: 2.4.8
 # authors: you
 # required_version: 3.0.0
 
@@ -432,7 +432,12 @@ after_initialize do
       # No domain hit -> random among all active providers
       if list.any?
         p = list.sample
-        warn("metrics fallback random_all domains=#{domains.inspect} (no matching active provider rows)")
+
+        # A2: only WARN this fallback when debug is enabled (silent otherwise)
+        if debug_enabled?
+          warn("metrics fallback random_all domains=#{domains.inspect} (no matching active provider rows)")
+        end
+
         return [p, "metrics_domain_not_found_fallback_random_all"] if p
       end
 
