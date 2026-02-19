@@ -565,6 +565,9 @@ after_initialize do
 
     message, type = *params
 
+    ::MultiSmtpRouter.warn("HOOK FIRED type=#{type} to=#{Array(message&.to).compact.map(&:to_s).inspect}")
+
+    
     uuid = SecureRandom.uuid
     to_list = Array(message&.to).compact.map(&:to_s)
     domains = ::MultiSmtpRouter.extract_recipient_domains(message)
