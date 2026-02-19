@@ -2,7 +2,7 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table.
-# version: 2.4.5
+# version: 2.4.6
 # authors: you
 # required_version: 3.0.0
 
@@ -19,7 +19,6 @@ after_initialize do
     PLUGIN_NAME = "discourse-multi-smtp-router"
     PROVIDER_SLOTS = 6
 
-    # Headers that other plugins (digest-report2) can read:
     HDR_PROVIDER_ID     = "X-Multi-SMTP-Router-Provider-Id"
     HDR_PROVIDER_SLOT   = "X-Multi-SMTP-Router-Provider-Slot"
     HDR_PROVIDER_WEIGHT = "X-Multi-SMTP-Router-Provider-Weight"
@@ -30,8 +29,6 @@ after_initialize do
 
     # --------------------
     # Logging helpers (LIKE unsub-update)
-    # - /admin/logs reliably shows WARN/ERROR.
-    # - So debug logs use WARN too, but only if debug switch is ON.
     # --------------------
     def self.enabled?
       SiteSetting.multi_smtp_router_enabled
@@ -45,13 +42,11 @@ after_initialize do
       return unless debug_enabled?
       Rails.logger.warn("[#{PLUGIN_NAME}] DEBUG #{msg}")
     rescue
-      # never block sending
     end
 
     def self.warn(msg)
       Rails.logger.warn("[#{PLUGIN_NAME}] #{msg}")
     rescue
-      # never block sending
     end
 
     # --------------------
@@ -69,7 +64,6 @@ after_initialize do
       SiteSetting.multi_smtp_router_weighted_enabled
     end
 
-    # Metrics-based routing switch
     def self.domain_metrics_enabled?
       SiteSetting.multi_smtp_router_domain_metrics_enabled
     rescue
@@ -116,11 +110,6 @@ after_initialize do
       (SiteSetting.multi_smtp_router_log_http_read_timeout || 3).to_i
     end
 
-    # --------------------
-    # Domain->provider pairs stored as list entries:
-    # gmail.com=provider_X
-    # yahoo.com=provider_Y
-    # --------------------
     def self.domain_provider_map
       raw = Array(SiteSetting.multi_smtp_router_domain_provider_pairs)
 
@@ -143,10 +132,6 @@ after_initialize do
       {}
     end
 
-    # --------------------
-    # Provider slots (UI-configured)
-    # Each has: enabled, id, from, reply_to, smtp..., weight_percent
-    # --------------------
     def self.providers
       out = []
 
@@ -207,9 +192,6 @@ after_initialize do
       providers.find { |p| p[:id].to_s == want }
     end
 
-    # --------------------
-    # Mail parsing
-    # --------------------
     def self.extract_recipient_domains(message)
       tos = Array(message&.to).compact
       tos.map do |addr|
@@ -222,9 +204,6 @@ after_initialize do
       end.compact.uniq
     end
 
-    # --------------------
-    # Weighted selection
-    # --------------------
     def self.choose_weighted_provider(list)
       weighted = list.select { |p| p[:weight_percent].to_i > 0 }
       total = weighted.sum { |p| p[:weight_percent].to_i }
@@ -240,9 +219,6 @@ after_initialize do
       [weighted.last, total]
     end
 
-    # --------------------
-    # Metrics-based selection per domain
-    # --------------------
     def self.domain_metrics_cache
       @domain_metrics_cache ||= {}
     end
@@ -377,6 +353,7 @@ after_initialize do
 
       if list.any?
         p = list.sample
+        warn("metrics fallback random_all domains=#{domains.inspect} (no matching active provider rows)")
         return [p, "metrics_domain_not_found_fallback_random_all"] if p
       end
 
@@ -386,16 +363,12 @@ after_initialize do
       [nil, "metrics_exception_fallback"]
     end
 
-    # --------------------
-    # Routing decision
-    # --------------------
     def self.choose_provider(message)
       list = providers
       return [nil, "no_enabled_providers"] if list.empty?
 
       domains = extract_recipient_domains(message)
 
-      # 1) Domain override wins
       if domain_override_enabled?
         map = domain_provider_map
         if !map.empty?
@@ -410,14 +383,12 @@ after_initialize do
         end
       end
 
-      # 2) Metrics-based routing per domain
       if domain_metrics_enabled?
         p, reason = choose_provider_by_domain_metrics(message, list)
         return [p, reason] if p
         debug("metrics enabled but did not select provider; continuing to other modes reason=#{reason}")
       end
 
-      # 3) Weighted mode
       if weighted_enabled?
         p, total = choose_weighted_provider(list)
         if p
@@ -427,7 +398,6 @@ after_initialize do
         end
       end
 
-      # 4) Equal random
       if random_enabled?
         return [list.sample, "random_enabled"]
       end
@@ -435,13 +405,9 @@ after_initialize do
       [nil, "no_routing_logic_enabled"]
     end
 
-    # --------------------
-    # Apply provider to THIS message
-    # --------------------
     def self.apply_provider!(message, provider)
       return if message.nil? || provider.nil?
 
-      # Preserve existing From display name; only swap email address.
       begin
         existing_from_raw =
           (message.header["From"] && message.header["From"].value.to_s.strip) ||
@@ -496,7 +462,6 @@ after_initialize do
       {}
     end
 
-    # Stamp provider decision onto message headers
     def self.stamp_headers!(message, uuid:, provider:, reason:)
       return if message.nil?
 
@@ -518,9 +483,6 @@ after_initialize do
       false
     end
 
-    # --------------------
-    # Async external logging
-    # --------------------
     def self.enqueue_log(payload)
       return unless log_to_endpoint_enabled?
       return if log_endpoint_url.empty?
@@ -530,9 +492,6 @@ after_initialize do
     end
   end
 
-  # ---------------------------
-  # Sidekiq job to POST logs
-  # ---------------------------
   module ::Jobs
     class MultiSmtpRouterLog < ::Jobs::Base
       def execute(args)
@@ -557,17 +516,14 @@ after_initialize do
     end
   end
 
-  # ---------------------------
-  # Main hook: never block sending
-  # ---------------------------
   DiscourseEvent.on(:before_email_send) do |*params|
     next unless ::MultiSmtpRouter.enabled?
 
     message, type = *params
 
+    # UNCONDITIONAL (shows in /admin/logs even if debug is off)
     ::MultiSmtpRouter.warn("HOOK FIRED type=#{type} to=#{Array(message&.to).compact.map(&:to_s).inspect}")
 
-    
     uuid = SecureRandom.uuid
     to_list = Array(message&.to).compact.map(&:to_s)
     domains = ::MultiSmtpRouter.extract_recipient_domains(message)
@@ -576,7 +532,6 @@ after_initialize do
 
     provider, reason = ::MultiSmtpRouter.choose_provider(message)
 
-    # If weighted enabled but total weight == 0, optionally fall back to random if random switch is on
     if provider.nil? && reason == "weighted_enabled_but_total_weight_zero"
       if ::MultiSmtpRouter.random_enabled?
         list = ::MultiSmtpRouter.providers
