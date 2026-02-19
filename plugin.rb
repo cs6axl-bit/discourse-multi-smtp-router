@@ -2,7 +2,7 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table.
-# version: 2.4.3
+# version: 2.4.5
 # authors: you
 # required_version: 3.0.0
 
@@ -29,7 +29,9 @@ after_initialize do
     METRICS_TABLE = "public.digest_provider_domain_metrics"
 
     # --------------------
-    # Logging helpers
+    # Logging helpers (LIKE unsub-update)
+    # - /admin/logs reliably shows WARN/ERROR.
+    # - So debug logs use WARN too, but only if debug switch is ON.
     # --------------------
     def self.enabled?
       SiteSetting.multi_smtp_router_enabled
@@ -39,52 +41,15 @@ after_initialize do
       SiteSetting.multi_smtp_router_debug_log_enabled
     end
 
-    # OPTIONAL: if you add this SiteSetting in settings.yml, debug can also go to /admin/logs (Errors)
-    def self.debug_to_errors_enabled?
-      SiteSetting.respond_to?(:multi_smtp_router_debug_to_errors_log) &&
-        SiteSetting.multi_smtp_router_debug_to_errors_log
-    rescue
-      false
-    end
-
-    # OPTIONAL: if you add this SiteSetting in settings.yml, warn() will also go to /admin/logs (Errors)
-    def self.log_to_errors_enabled?
-      SiteSetting.respond_to?(:multi_smtp_router_log_to_errors_log) &&
-        SiteSetting.multi_smtp_router_log_to_errors_log
-    rescue
-      true
-      # NOTE: defaulting to true is intentional for your request:
-      # "I want it to log to the errors log".
-      # If you don't want that default, change this to false.
-    end
-
-    # Send message to Admin -> Logs -> Errors (Discourse exception log)
-    # This is what shows up in https://<site>/admin/logs (Errors)
-    def self.error_log(msg, extra: nil, exception: nil)
-      e = exception || RuntimeError.new(msg.to_s)
-
-      Discourse.warn_exception(
-        e,
-        message: "[#{PLUGIN_NAME}] #{msg}",
-        env: (extra.is_a?(Hash) ? extra : nil)
-      )
-    rescue
-      # never block sending
-    end
-
     def self.debug(msg)
       return unless debug_enabled?
-      Rails.logger.info("[#{PLUGIN_NAME}] #{msg}")
-      error_log("DEBUG: #{msg}") if debug_to_errors_enabled?
+      Rails.logger.warn("[#{PLUGIN_NAME}] DEBUG #{msg}")
     rescue
       # never block sending
     end
 
-    def self.warn(msg, extra: nil, exception: nil)
-      Rails.logger.warn("[#{PLUGIN_NAME}] #{msg}") rescue nil
-      if log_to_errors_enabled?
-        error_log(msg, extra: extra, exception: exception)
-      end
+    def self.warn(msg)
+      Rails.logger.warn("[#{PLUGIN_NAME}] #{msg}")
     rescue
       # never block sending
     end
@@ -104,21 +69,19 @@ after_initialize do
       SiteSetting.multi_smtp_router_weighted_enabled
     end
 
-    # NEW: metrics-based routing switch
+    # Metrics-based routing switch
     def self.domain_metrics_enabled?
       SiteSetting.multi_smtp_router_domain_metrics_enabled
     rescue
       false
     end
 
-    # NEW: cache TTL seconds for per-domain metrics lookup
     def self.domain_metrics_cache_ttl
       (SiteSetting.multi_smtp_router_domain_metrics_cache_ttl_seconds || 300).to_i
     rescue
       300
     end
 
-    # NEW: % of times to skip metrics query and randomize across active providers
     def self.domain_metrics_pre_random_percent
       v = (SiteSetting.multi_smtp_router_domain_metrics_pre_random_percent || 10).to_i
       v = 0 if v < 0
@@ -128,7 +91,6 @@ after_initialize do
       10
     end
 
-    # NEW: if metrics query returns ONLY ONE provider row, % of times to randomize across active providers instead
     def self.domain_metrics_single_row_random_percent
       v = (SiteSetting.multi_smtp_router_domain_metrics_single_row_random_percent || 0).to_i
       v = 0 if v < 0
@@ -167,7 +129,6 @@ after_initialize do
         s = line.to_s.strip
         next if s.empty?
 
-        # accept: "gmail.com=provider_x" or "gmail.com>provider_x" or "gmail.com:provider_x"
         if (m = s.match(/\A([^=:\s>]+)\s*(=|:|>)\s*([A-Za-z0-9_\-]+)\z/))
           domain = m[1].downcase.strip
           provider_id = m[3].strip
@@ -178,7 +139,7 @@ after_initialize do
 
       map
     rescue => e
-      warn("domain_provider_map parse failed: #{e.class}: #{e.message}", exception: e)
+      warn("domain_provider_map parse failed: #{e.class}: #{e.message}")
       {}
     end
 
@@ -233,7 +194,7 @@ after_initialize do
             smtp: smtp
           }
         rescue => e
-          warn("provider slot #{i} read failed: #{e.class}: #{e.message}", exception: e)
+          warn("provider slot #{i} read failed: #{e.class}: #{e.message}")
         end
       end
 
@@ -283,7 +244,6 @@ after_initialize do
     # Metrics-based selection per domain
     # --------------------
     def self.domain_metrics_cache
-      # { "gmail.com" => { expires_at: TimeInt, rows: [...] } }
       @domain_metrics_cache ||= {}
     end
 
@@ -309,11 +269,7 @@ after_initialize do
 
         res = ::DB.query(sql, d)
 
-        begin
-          debug("metrics raw domain=#{d} class=#{res.class} sample=#{res.inspect.to_s[0,200]}")
-        rescue
-          # ignore
-        end
+        debug("metrics raw domain=#{d} class=#{res.class} sample=#{res.inspect.to_s[0,200]}")
 
         ary =
           if res.is_a?(Array)
@@ -344,13 +300,9 @@ after_initialize do
           }
         end
 
-        begin
-          debug("metrics parsed domain=#{d} rows=#{rows.length} provider_ids=#{rows.map { |x| x[:provider_id] }.uniq.inspect}")
-        rescue
-          # ignore
-        end
+        debug("metrics parsed domain=#{d} rows=#{rows.length} provider_ids=#{rows.map { |x| x[:provider_id] }.uniq.inspect}")
       rescue => e
-        warn("metrics lookup failed domain=#{d}: #{e.class}: #{e.message}", exception: e)
+        warn("metrics lookup failed domain=#{d}: #{e.class}: #{e.message}")
         rows = []
       end
 
@@ -386,7 +338,7 @@ after_initialize do
         rows = rows.select { |r| active_ids.include?(r[:provider_id].to_s) }
 
         if rows.empty?
-          debug("metrics domain=#{domain} no rows for active providers")
+          debug("metrics domain=#{domain} no rows for active providers active_ids=#{active_ids.inspect}")
           next
         end
 
@@ -430,7 +382,7 @@ after_initialize do
 
       [nil, "metrics_no_active_providers"]
     rescue => e
-      warn("choose_provider_by_domain_metrics failed: #{e.class}: #{e.message}", exception: e)
+      warn("choose_provider_by_domain_metrics failed: #{e.class}: #{e.message}")
       [nil, "metrics_exception_fallback"]
     end
 
@@ -489,6 +441,7 @@ after_initialize do
     def self.apply_provider!(message, provider)
       return if message.nil? || provider.nil?
 
+      # Preserve existing From display name; only swap email address.
       begin
         existing_from_raw =
           (message.header["From"] && message.header["From"].value.to_s.strip) ||
@@ -522,7 +475,7 @@ after_initialize do
           message["From"] = new_from.format
         end
       rescue => e
-        warn("apply_provider From header update failed: #{e.class}: #{e.message}", exception: e)
+        warn("apply_provider From header update failed: #{e.class}: #{e.message}")
       end
 
       if provider[:reply_to_address].to_s.strip.length > 0
@@ -543,6 +496,7 @@ after_initialize do
       {}
     end
 
+    # Stamp provider decision onto message headers
     def self.stamp_headers!(message, uuid:, provider:, reason:)
       return if message.nil?
 
@@ -572,7 +526,7 @@ after_initialize do
       return if log_endpoint_url.empty?
       Jobs.enqueue(:multi_smtp_router_log, payload: payload)
     rescue => e
-      warn("log enqueue failed: #{e.class}: #{e.message}", exception: e)
+      warn("log enqueue failed: #{e.class}: #{e.message}")
     end
   end
 
@@ -598,7 +552,7 @@ after_initialize do
 
         http.request(req)
       rescue => e
-        ::MultiSmtpRouter.warn("log post failed: #{e.class}: #{e.message}", exception: e)
+        ::MultiSmtpRouter.warn("log post failed: #{e.class}: #{e.message}")
       end
     end
   end
@@ -664,6 +618,6 @@ after_initialize do
       }
     )
   rescue => e
-    ::MultiSmtpRouter.warn("before_email_send failed: #{e.class}: #{e.message}", exception: e)
+    ::MultiSmtpRouter.warn("before_email_send failed: #{e.class}: #{e.message}")
   end
 end
