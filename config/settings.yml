@@ -1,496 +1,484 @@
 # config/settings.yml
+
 plugins:
-  # =========================
-  # GLOBAL
-  # =========================
   multi_smtp_router_enabled:
     default: false
     client: false
+    type: bool
 
   multi_smtp_router_debug_log_enabled:
     default: false
     client: false
+    type: bool
 
-  # Logster (/admin/logs) prefers WARN/ERROR; our plugin uses Rails.logger.warn for debug too,
-  # so these are mostly legacy toggles now, but keep them for compatibility:
-  multi_smtp_router_log_to_errors_log:
-    default: true
-    client: false
-
-  multi_smtp_router_debug_to_errors_log:
-    default: false
-    client: false
-
+  # Routing mode switches
   multi_smtp_router_random_enabled:
     default: true
     client: false
+    type: bool
 
   multi_smtp_router_weighted_enabled:
     default: false
     client: false
+    type: bool
 
   multi_smtp_router_domain_override_enabled:
-    default: true
+    default: false
     client: false
+    type: bool
 
-  # Domain override list entries like:
-  # gmail.com=provider_X
-  # yahoo.com=provider_Y
-  multi_smtp_router_domain_provider_pairs:
-    type: list
-    default: ""
-    client: false
-
-  # =========================
-  # METRICS-BASED ROUTING
-  # =========================
-  # Uses Postgres table public.digest_provider_domain_metrics
+  # Metrics-based routing (uses digest_provider_domain_metrics)
   multi_smtp_router_domain_metrics_enabled:
     default: false
     client: false
+    type: bool
 
-  # Per-process in-memory cache TTL for metrics lookups (seconds)
-  # 0 = disable cache
+  # 45 minutes = 2700 seconds
   multi_smtp_router_domain_metrics_cache_ttl_seconds:
-    default: 1500
-    min: 0
-    max: 3600
+    default: 2700
     client: false
     type: integer
+    min: 60
+    max: 86400
 
-  # % of times to skip metrics query and randomize across active providers
   multi_smtp_router_domain_metrics_pre_random_percent:
     default: 10
-    min: 0
-    max: 100
     client: false
     type: integer
+    min: 0
+    max: 100
 
-  # If metrics query returns ONLY ONE provider row, % of times to randomize across active providers instead
   multi_smtp_router_domain_metrics_single_row_random_percent:
     default: 0
-    min: 0
-    max: 100
     client: false
     type: integer
+    min: 0
+    max: 100
 
-  # =========================
-  # EXTERNAL LOG (ASYNC)
-  # =========================
+  # Domain override pairs (list)
+  # Example lines:
+  #   gmail.com=mailgun
+  #   yahoo.com:sendpulse
+  #   outlook.com>sparkpost1
+  multi_smtp_router_domain_provider_pairs:
+    default: ""
+    client: false
+    type: list
+
+  # Optional async external logging
   multi_smtp_router_log_to_endpoint_enabled:
     default: false
     client: false
+    type: bool
 
   multi_smtp_router_log_endpoint_url:
-    default: "http://172.17.0.1:8081/smtp_router_log.php"
+    default: ""
     client: false
+    type: text
 
   multi_smtp_router_log_http_open_timeout:
     default: 2
-    min: 0
-    max: 60
     client: false
     type: integer
+    min: 1
+    max: 30
 
   multi_smtp_router_log_http_read_timeout:
     default: 3
-    min: 0
-    max: 60
     client: false
     type: integer
+    min: 1
+    max: 60
 
-  # =========================
-  # PROVIDER 1
-  # =========================
+  # --------------------
+  # Provider slots (6)
+  # --------------------
   multi_smtp_router_p1_enabled:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p1_id:
-    default: "provider_X"
+    default: ""
     client: false
-
+    type: text
   multi_smtp_router_p1_weight_percent:
-    default: 50
-    min: 0
-    max: 100
+    default: 0
     client: false
     type: integer
-
+    min: 0
+    max: 100
   multi_smtp_router_p1_from_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p1_reply_to_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p1_smtp_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p1_smtp_port:
     default: 587
-    min: 0
-    max: 65535
     client: false
     type: integer
-
+    min: 1
+    max: 65535
   multi_smtp_router_p1_smtp_username:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p1_smtp_password:
     default: ""
-    secret: true
     client: false
-
+    type: password
   multi_smtp_router_p1_smtp_authentication_mode:
-    default: "plain"
+    default: plain
     client: false
-
+    type: enum
+    choices:
+      - plain
+      - login
+      - cram_md5
   multi_smtp_router_p1_smtp_enable_starttls_auto:
     default: true
     client: false
-
+    type: bool
   multi_smtp_router_p1_smtp_ssl:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p1_smtp_tls:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p1_smtp_domain:
     default: ""
     client: false
+    type: text
 
-  # =========================
-  # PROVIDER 2
-  # =========================
   multi_smtp_router_p2_enabled:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p2_id:
-    default: "provider_Y"
+    default: ""
     client: false
-
+    type: text
   multi_smtp_router_p2_weight_percent:
-    default: 50
-    min: 0
-    max: 100
+    default: 0
     client: false
     type: integer
-
+    min: 0
+    max: 100
   multi_smtp_router_p2_from_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p2_reply_to_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p2_smtp_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p2_smtp_port:
     default: 587
-    min: 0
-    max: 65535
     client: false
     type: integer
-
+    min: 1
+    max: 65535
   multi_smtp_router_p2_smtp_username:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p2_smtp_password:
     default: ""
-    secret: true
     client: false
-
+    type: password
   multi_smtp_router_p2_smtp_authentication_mode:
-    default: "plain"
+    default: plain
     client: false
-
+    type: enum
+    choices:
+      - plain
+      - login
+      - cram_md5
   multi_smtp_router_p2_smtp_enable_starttls_auto:
     default: true
     client: false
-
+    type: bool
   multi_smtp_router_p2_smtp_ssl:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p2_smtp_tls:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p2_smtp_domain:
     default: ""
     client: false
+    type: text
 
-  # =========================
-  # PROVIDER 3
-  # =========================
   multi_smtp_router_p3_enabled:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p3_id:
-    default: "provider_A"
+    default: ""
     client: false
-
+    type: text
   multi_smtp_router_p3_weight_percent:
     default: 0
-    min: 0
-    max: 100
     client: false
     type: integer
-
+    min: 0
+    max: 100
   multi_smtp_router_p3_from_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p3_reply_to_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p3_smtp_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p3_smtp_port:
     default: 587
-    min: 0
-    max: 65535
     client: false
     type: integer
-
+    min: 1
+    max: 65535
   multi_smtp_router_p3_smtp_username:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p3_smtp_password:
     default: ""
-    secret: true
     client: false
-
+    type: password
   multi_smtp_router_p3_smtp_authentication_mode:
-    default: "plain"
+    default: plain
     client: false
-
+    type: enum
+    choices:
+      - plain
+      - login
+      - cram_md5
   multi_smtp_router_p3_smtp_enable_starttls_auto:
     default: true
     client: false
-
+    type: bool
   multi_smtp_router_p3_smtp_ssl:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p3_smtp_tls:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p3_smtp_domain:
     default: ""
     client: false
+    type: text
 
-  # =========================
-  # PROVIDER 4
-  # =========================
   multi_smtp_router_p4_enabled:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p4_id:
-    default: "provider_B"
+    default: ""
     client: false
-
+    type: text
   multi_smtp_router_p4_weight_percent:
     default: 0
-    min: 0
-    max: 100
     client: false
     type: integer
-
+    min: 0
+    max: 100
   multi_smtp_router_p4_from_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p4_reply_to_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p4_smtp_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p4_smtp_port:
     default: 587
-    min: 0
-    max: 65535
     client: false
     type: integer
-
+    min: 1
+    max: 65535
   multi_smtp_router_p4_smtp_username:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p4_smtp_password:
     default: ""
-    secret: true
     client: false
-
+    type: password
   multi_smtp_router_p4_smtp_authentication_mode:
-    default: "plain"
+    default: plain
     client: false
-
+    type: enum
+    choices:
+      - plain
+      - login
+      - cram_md5
   multi_smtp_router_p4_smtp_enable_starttls_auto:
     default: true
     client: false
-
+    type: bool
   multi_smtp_router_p4_smtp_ssl:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p4_smtp_tls:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p4_smtp_domain:
     default: ""
     client: false
+    type: text
 
-  # =========================
-  # PROVIDER 5
-  # =========================
   multi_smtp_router_p5_enabled:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p5_id:
-    default: "provider_C"
+    default: ""
     client: false
-
+    type: text
   multi_smtp_router_p5_weight_percent:
     default: 0
-    min: 0
-    max: 100
     client: false
     type: integer
-
+    min: 0
+    max: 100
   multi_smtp_router_p5_from_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p5_reply_to_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p5_smtp_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p5_smtp_port:
     default: 587
-    min: 0
-    max: 65535
     client: false
     type: integer
-
+    min: 1
+    max: 65535
   multi_smtp_router_p5_smtp_username:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p5_smtp_password:
     default: ""
-    secret: true
     client: false
-
+    type: password
   multi_smtp_router_p5_smtp_authentication_mode:
-    default: "plain"
+    default: plain
     client: false
-
+    type: enum
+    choices:
+      - plain
+      - login
+      - cram_md5
   multi_smtp_router_p5_smtp_enable_starttls_auto:
     default: true
     client: false
-
+    type: bool
   multi_smtp_router_p5_smtp_ssl:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p5_smtp_tls:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p5_smtp_domain:
     default: ""
     client: false
+    type: text
 
-  # =========================
-  # PROVIDER 6
-  # =========================
   multi_smtp_router_p6_enabled:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p6_id:
-    default: "provider_D"
+    default: ""
     client: false
-
+    type: text
   multi_smtp_router_p6_weight_percent:
     default: 0
-    min: 0
-    max: 100
     client: false
     type: integer
-
+    min: 0
+    max: 100
   multi_smtp_router_p6_from_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p6_reply_to_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p6_smtp_address:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p6_smtp_port:
     default: 587
-    min: 0
-    max: 65535
     client: false
     type: integer
-
+    min: 1
+    max: 65535
   multi_smtp_router_p6_smtp_username:
     default: ""
     client: false
-
+    type: text
   multi_smtp_router_p6_smtp_password:
     default: ""
-    secret: true
     client: false
-
+    type: password
   multi_smtp_router_p6_smtp_authentication_mode:
-    default: "plain"
+    default: plain
     client: false
-
+    type: enum
+    choices:
+      - plain
+      - login
+      - cram_md5
   multi_smtp_router_p6_smtp_enable_starttls_auto:
     default: true
     client: false
-
+    type: bool
   multi_smtp_router_p6_smtp_ssl:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p6_smtp_tls:
     default: false
     client: false
-
+    type: bool
   multi_smtp_router_p6_smtp_domain:
     default: ""
     client: false
+    type: text
