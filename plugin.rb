@@ -2,7 +2,7 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table.
-# version: 2.4.8
+# version: 2.5.1
 # authors: you
 # required_version: 3.0.0
 
@@ -19,7 +19,7 @@ after_initialize do
     PLUGIN_NAME = "discourse-multi-smtp-router"
     PROVIDER_SLOTS = 6
 
-    # Headers that other plugins (digest-report2) can read:
+    # Headers that other plugins can read:
     HDR_PROVIDER_ID     = "X-Multi-SMTP-Router-Provider-Id"
     HDR_PROVIDER_SLOT   = "X-Multi-SMTP-Router-Provider-Slot"
     HDR_PROVIDER_WEIGHT = "X-Multi-SMTP-Router-Provider-Weight"
@@ -28,9 +28,11 @@ after_initialize do
 
     METRICS_TABLE = "public.digest_provider_domain_metrics"
 
+    # ONE shared key for the whole table (L2, cross-process)
+    METRICS_ALL_CACHE_KEY = "#{PLUGIN_NAME}:metrics:all:v1"
+
     # --------------------
-    # Logging helpers (LIKE unsub-update)
-    # /admin/logs reliably shows WARN/ERROR. So debug logs use WARN too.
+    # Logging helpers
     # --------------------
     def self.enabled?
       SiteSetting.multi_smtp_router_enabled
@@ -75,14 +77,14 @@ after_initialize do
       false
     end
 
-    # cache TTL seconds for per-domain metrics lookup
+    # cache TTL seconds for metrics lookup
     def self.domain_metrics_cache_ttl
-      (SiteSetting.multi_smtp_router_domain_metrics_cache_ttl_seconds || 300).to_i
+      (SiteSetting.multi_smtp_router_domain_metrics_cache_ttl_seconds || 2700).to_i # 45 min default
     rescue
-      300
+      2700
     end
 
-    # % of times to skip metrics query and randomize across active providers
+    # % of times to skip metrics and randomize across active providers
     def self.domain_metrics_pre_random_percent
       v = (SiteSetting.multi_smtp_router_domain_metrics_pre_random_percent || 10).to_i
       v = 0 if v < 0
@@ -92,7 +94,7 @@ after_initialize do
       10
     end
 
-    # if metrics query returns ONLY ONE provider row, % of times to randomize across active providers instead
+    # If metrics yields exactly 1 row for a domain, % of times to randomize anyway (when >1 provider active)
     def self.domain_metrics_single_row_random_percent
       v = (SiteSetting.multi_smtp_router_domain_metrics_single_row_random_percent || 0).to_i
       v = 0 if v < 0
@@ -119,7 +121,7 @@ after_initialize do
     end
 
     # --------------------
-    # Domain->provider pairs stored as list entries:
+    # Domain override pairs stored as list entries:
     # gmail.com=provider_X
     # yahoo.com=provider_Y
     # --------------------
@@ -244,121 +246,143 @@ after_initialize do
     end
 
     # --------------------
-    # Metrics-based selection per domain
+    # L1 (per-process) + L2 (Discourse.cache, cross-process) whole-table cache
+    # map shape:
+    #   { "gmail.com" => [ {provider_id:, open_percent:, click_percent:}, ... ], ... }
     # --------------------
-    def self.domain_metrics_cache
-      # { "gmail.com" => { expires_at: TimeInt, rows: [...] } }
-      @domain_metrics_cache ||= {}
+    def self.metrics_all_l1
+      @metrics_all_l1 ||= { expires_at: 0, map: nil }
+    end
+
+    def self.fetch_all_domain_metrics_map
+      ttl = domain_metrics_cache_ttl.to_i
+      ttl = 2700 if ttl <= 0
+
+      now = Time.now.to_i
+      l1 = metrics_all_l1
+
+      # L1 hot-path (no Redis)
+      if l1[:map].is_a?(Hash) && l1[:expires_at].to_i > now
+        return l1[:map]
+      end
+
+      # L2 shared (across processes)
+      map = Discourse.cache.fetch(METRICS_ALL_CACHE_KEY, expires_in: ttl.seconds) do
+        built = {}
+
+        begin
+          sql = <<~SQL
+            SELECT email_domain, provider_id, open_percent, click_percent
+            FROM #{METRICS_TABLE}
+          SQL
+
+          res = ::DB.query(sql)
+          debug("metrics_all raw class=#{res.class} sample=#{res.inspect.to_s[0,200]}")
+
+          ary =
+            if res.is_a?(Array)
+              res
+            elsif res.is_a?(Hash)
+              [res]
+            elsif res.respond_to?(:to_a)
+              tmp = res.to_a
+              tmp.is_a?(Array) ? tmp : []
+            else
+              warn("metrics_all unexpected result class=#{res.class}")
+              []
+            end
+
+          get = lambda do |row, key|
+            k = key.to_s
+
+            if row.respond_to?(:[])
+              begin
+                v = row[key.to_sym]
+                return v unless v.nil?
+              rescue
+              end
+              begin
+                v = row[k]
+                return v unless v.nil?
+              rescue
+              end
+            end
+
+            if row.respond_to?(key)
+              begin
+                v = row.public_send(key)
+                return v unless v.nil?
+              rescue
+              end
+            end
+            if row.respond_to?(k)
+              begin
+                v = row.public_send(k)
+                return v unless v.nil?
+              rescue
+              end
+            end
+
+            iv = :"@#{k}"
+            if row.respond_to?(:instance_variable_defined?) && row.instance_variable_defined?(iv)
+              begin
+                return row.instance_variable_get(iv)
+              rescue
+              end
+            end
+
+            nil
+          end
+
+          total_rows = 0
+          ary.each do |r|
+            domain = get.call(r, :email_domain).to_s.downcase.strip
+            next if domain.empty?
+
+            pid = get.call(r, :provider_id).to_s.strip
+            next if pid.empty?
+
+            op = get.call(r, :open_percent)
+            cp = get.call(r, :click_percent)
+
+            built[domain] ||= []
+            built[domain] << {
+              provider_id: pid,
+              open_percent:  (op.nil? ? 0 : op).to_f,
+              click_percent: (cp.nil? ? 0 : cp).to_f
+            }
+            total_rows += 1
+          end
+
+          debug("metrics_all parsed domains=#{built.keys.length} rows_total=#{total_rows}")
+        rescue => e
+          warn("metrics_all lookup failed: #{e.class}: #{e.message}")
+          built = {}
+        end
+
+        built
+      end
+
+      map = {} unless map.is_a?(Hash)
+
+      # refresh L1 from L2 result
+      @metrics_all_l1 = { expires_at: now + ttl, map: map }
+
+      map
+    rescue => e
+      warn("metrics_all cache fetch failed: #{e.class}: #{e.message}")
+      {}
     end
 
     def self.fetch_domain_metrics_rows(domain)
       d = domain.to_s.downcase.strip
       return [] if d.empty?
 
-      ttl = domain_metrics_cache_ttl
-      now = Time.now.to_i
-
-      cached = domain_metrics_cache[d]
-      if cached && cached[:expires_at].to_i > now
-        return cached[:rows] || []
-      end
-
-      rows = []
-      begin
-        sql = <<~SQL
-          SELECT provider_id, open_percent, click_percent
-          FROM #{METRICS_TABLE}
-          WHERE email_domain = ?
-        SQL
-
-        res = ::DB.query(sql, d)
-
-        debug("metrics raw domain=#{d} class=#{res.class} sample=#{res.inspect.to_s[0,200]}")
-
-        ary =
-          if res.is_a?(Array)
-            res
-          elsif res.is_a?(Hash)
-            [res]
-          elsif (res.is_a?(Class) || res.is_a?(Module))
-            warn("metrics lookup returned #{res.class} (not rows) domain=#{d}")
-            []
-          elsif res.respond_to?(:to_a)
-            tmp = res.to_a
-            tmp.is_a?(Array) ? tmp : []
-          else
-            warn("metrics lookup unexpected result class=#{res.class} domain=#{d}")
-            []
-          end
-
-        # Extract values from:
-        # - Hash rows (r[:provider_id])
-        # - Sequel model rows (r.provider_id)
-        # - Objects with @provider_id ivar
-        get = lambda do |row, key|
-          k = key.to_s
-
-          if row.respond_to?(:[])
-            begin
-              v = row[key.to_sym]
-              return v unless v.nil?
-            rescue
-            end
-            begin
-              v = row[k]
-              return v unless v.nil?
-            rescue
-            end
-          end
-
-          if row.respond_to?(key)
-            begin
-              v = row.public_send(key)
-              return v unless v.nil?
-            rescue
-            end
-          end
-          if row.respond_to?(k)
-            begin
-              v = row.public_send(k)
-              return v unless v.nil?
-            rescue
-            end
-          end
-
-          iv = :"@#{k}"
-          if row.respond_to?(:instance_variable_defined?) && row.instance_variable_defined?(iv)
-            begin
-              return row.instance_variable_get(iv)
-            rescue
-            end
-          end
-
-          nil
-        end
-
-        ary.each do |r|
-          pid = get.call(r, :provider_id).to_s.strip
-          next if pid.empty?
-
-          op = get.call(r, :open_percent)
-          cp = get.call(r, :click_percent)
-
-          rows << {
-            provider_id: pid,
-            open_percent:  (op.nil? ? 0 : op).to_f,
-            click_percent: (cp.nil? ? 0 : cp).to_f
-          }
-        end
-
-        debug("metrics parsed domain=#{d} rows=#{rows.length} provider_ids=#{rows.map { |x| x[:provider_id] }.uniq.inspect}")
-      rescue => e
-        warn("metrics lookup failed domain=#{d}: #{e.class}: #{e.message}")
-        rows = []
-      end
-
-      domain_metrics_cache[d] = { expires_at: now + ttl, rows: rows }
-      rows
+      map = fetch_all_domain_metrics_map
+      map[d] || []
+    rescue => e
+      warn("fetch_domain_metrics_rows failed domain=#{domain}: #{e.class}: #{e.message}")
+      []
     end
 
     def self.percent_hit?(pct)
