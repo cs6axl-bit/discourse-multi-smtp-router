@@ -190,13 +190,18 @@ after_initialize do
           smtp[:tls] = true if tls
           smtp[:domain] = helo_domain unless helo_domain.empty?
 
+          allowed_statuses = SiteSetting
+            .public_send("multi_smtp_router_p#{i}_allowed_verification_statuses")
+            .to_s.split(",").map(&:strip).reject(&:empty?)
+
           out << {
             slot: i,
             id: id,
             weight_percent: weight,
             from_address: from_addr,
             reply_to_address: reply_to,
-            smtp: smtp
+            smtp: smtp,
+            allowed_verification_statuses: allowed_statuses
           }
         rescue => e
           warn("provider slot #{i} read failed: #{e.class}: #{e.message}")
@@ -478,6 +483,19 @@ after_initialize do
       list = providers
       return [nil, "no_enabled_providers"] if list.empty?
 
+      # Filter pool by email verification status
+      if verification_enabled?
+        email  = Array(message&.to).first.to_s
+        status = fetch_verification_status(email)
+        debug("verification email=#{email} status=#{status}")
+
+        list = filter_providers_by_verification(list, status)
+
+        if list.empty?
+          return [nil, "verification_no_pool(email=#{email} status=#{status})"]
+        end
+      end
+
       domains = extract_recipient_domains(message)
 
       # 1) Domain override wins
@@ -612,6 +630,100 @@ after_initialize do
       Jobs.enqueue(:multi_smtp_router_log, payload: payload)
     rescue => e
       warn("log enqueue failed: #{e.class}: #{e.message}")
+    end
+
+    # ============================================================
+    # Email verification-based pool filtering
+    # ============================================================
+
+    def self.verification_enabled?
+      SiteSetting.multi_smtp_router_verification_enabled
+    rescue
+      false
+    end
+
+    def self.verification_cache_enabled?
+      SiteSetting.multi_smtp_router_verification_cache_enabled
+    rescue
+      true
+    end
+
+    def self.verification_cache_ttl
+      days = (SiteSetting.multi_smtp_router_verification_cache_ttl_days || 30).to_i
+      days = 1   if days < 1
+      days = 365 if days > 365
+      days * 86_400
+    rescue
+      30 * 86_400
+    end
+
+    def self.verification_table
+      SiteSetting.multi_smtp_router_verification_table.to_s.strip.presence || "email_verifications"
+    rescue
+      "email_verifications"
+    end
+
+    def self.verification_email_column
+      SiteSetting.multi_smtp_router_verification_email_column.to_s.strip.presence || "email"
+    rescue
+      "email"
+    end
+
+    def self.verification_status_column
+      SiteSetting.multi_smtp_router_verification_status_column.to_s.strip.presence || "status"
+    rescue
+      "status"
+    end
+
+    def self.verification_default_status
+      SiteSetting.multi_smtp_router_verification_default_status.to_s.strip.presence || "unknown"
+    rescue
+      "unknown"
+    end
+
+    def self.verification_cache_key(email)
+      "#{PLUGIN_NAME}:verif:#{email.to_s.downcase.strip}"
+    end
+
+    def self.fetch_verification_status(email)
+      e = email.to_s.downcase.strip
+      return verification_default_status if e.empty?
+
+      if verification_cache_enabled?
+        cached = Discourse.cache.read(verification_cache_key(e))
+        return cached if cached
+      end
+
+      status = begin
+        tbl  = verification_table
+        ecol = verification_email_column
+        scol = verification_status_column
+
+        row = ::DB.query_single(
+          "SELECT #{scol} FROM #{tbl} WHERE #{ecol} = :email LIMIT 1",
+          email: e
+        )
+        row.first.to_s.strip.presence || verification_default_status
+      rescue => ex
+        warn("fetch_verification_status db failed email=#{e}: #{ex.class}: #{ex.message}")
+        verification_default_status
+      end
+
+      if verification_cache_enabled?
+        Discourse.cache.write(verification_cache_key(e), status, expires_in: verification_cache_ttl)
+      end
+
+      status
+    rescue => e
+      warn("fetch_verification_status failed: #{e.class}: #{e.message}")
+      verification_default_status
+    end
+
+    def self.filter_providers_by_verification(list, status)
+      list.select do |p|
+        allowed = p[:allowed_verification_statuses]
+        allowed.empty? || allowed.include?(status)
+      end
     end
 
     # ============================================================
@@ -981,6 +1093,12 @@ after_initialize do
       else
         ::MultiSmtpRouter.warn("uuid=#{uuid} weighted enabled but total weight=0 and random disabled; default SMTP will be used")
       end
+    end
+
+    if reason&.start_with?("verification_no_pool")
+      ::MultiSmtpRouter.warn("uuid=#{uuid} skipping send: #{reason}")
+      message.perform_deliveries = false
+      next
     end
 
     if provider
