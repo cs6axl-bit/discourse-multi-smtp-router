@@ -992,47 +992,51 @@ after_initialize do
     def self.ds_swap_message_id!(message, target)
       return unless message.respond_to?(:header) && message.header
 
-      # Optionally force lazy generation before reading, same trick as campaigns plugin.
-      # Needed for email types where ActionMailer generates Message-ID on first access.
+      # Optionally force lazy generation before reading (needed for some email types
+      # where ActionMailer generates Message-ID on first access via .message_id).
       if SiteSetting.multi_smtp_router_domain_swap_message_id_force_generate rescue false
         _ = message.message_id if message.respond_to?(:message_id)
       end
 
-      fields = message.header.fields.select do |f|
-        f.name.to_s.casecmp?("Message-ID") || f.name.to_s.casecmp?("Message-Id")
+      # Use .to_s on the header field (not .value) — triggers full encoding/lazy generation.
+      # Falls back to header["Message-ID"] if field enumeration yields nothing.
+      raw = begin
+        fields = message.header.fields.select do |f|
+          f.name.to_s.casecmp?("Message-ID") || f.name.to_s.casecmp?("Message-Id")
+        end
+        if fields.any?
+          fields.first.to_s.strip
+        else
+          (message.header["Message-ID"]).to_s.strip
+        end
       end
-      fields = [message.header["Message-ID"]].compact if fields.empty? && message.header["Message-ID"]
-      return if fields.empty?
 
-      fields.each do |f|
-        old_val = (f.respond_to?(:value) ? f.value : f.to_s).to_s.strip
-        next if old_val.empty?
+      return if raw.empty?
 
-        m = old_val.match(/<([^<>@\s]+)@([^<>@\s]+)>/)
-        next unless m
+      # Strip surrounding <> then split on first @
+      s = raw.start_with?("<") && raw.end_with?(">") ? raw[1..-2].strip : raw
+      return unless s.include?("@")
 
-        new_host = ds_rewrite_host(m[2].to_s, target)
-        next unless new_host
+      local, dom = s.split("@", 2)
+      local = local.to_s.strip
+      dom   = dom.to_s.strip
+      return if local.empty? || dom.empty?
 
-        new_val = old_val.sub(
-          /<#{Regexp.escape(m[1])}@#{Regexp.escape(m[2])}>/,
-          "<#{m[1]}@#{new_host}>"
-        )
-        next if new_val == old_val
+      new_host = ds_rewrite_host(dom, target)
+      return unless new_host
 
+      new_mid = "<#{local}@#{new_host}>"
+
+      message.header["Message-ID"] = new_mid
+
+      if message.respond_to?(:message_id=)
         begin
-          f.value = new_val
+          message.message_id = new_mid
         rescue
-          message.header["Message-ID"] = new_val
-        end
-
-        if message.respond_to?(:message_id=)
-          begin
-            message.message_id = new_val
-          rescue
-          end
         end
       end
+
+      debug("domain_swap message_id: #{raw} -> #{new_mid}")
     rescue => e
       warn("domain_swap message_id failed: #{e.class}: #{e.message}")
     end
