@@ -706,6 +706,7 @@ plugins:
     type: text
   # Domain swap for provider 6
   multi_smtp_router_p6_domain_swap_enabled:
+
     default: false
     client: false
     type: bool
@@ -730,6 +731,204 @@ plugins:
     client: false
     type: bool
   multi_smtp_router_p6_domain_swap_everywhere:
+    default: false
+    client: false
+    type: bool
+
+  multi_smtp_router_p7_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p7_id:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p7_weight_percent:
+    default: 0
+    client: false
+    type: integer
+    min: 0
+    max: 100
+  multi_smtp_router_p7_from_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p7_reply_to_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p7_smtp_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p7_smtp_port:
+    default: 587
+    client: false
+    type: integer
+    min: 1
+    max: 65535
+  multi_smtp_router_p7_smtp_username:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p7_smtp_password:
+    default: ""
+    client: false
+    type: password
+  multi_smtp_router_p7_smtp_authentication_mode:
+    default: plain
+    client: false
+    type: enum
+    choices:
+      - plain
+      - login
+      - cram_md5
+  multi_smtp_router_p7_smtp_enable_starttls_auto:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p7_smtp_ssl:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p7_smtp_tls:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p7_smtp_domain:
+    default: ""
+    client: false
+    type: text
+  # Verification pool filter for provider 7 (comma-separated statuses; empty = accept any)
+  multi_smtp_router_p7_allowed_verification_statuses:
+    default: ""
+    client: false
+    type: text
+  # Domain swap for provider 7
+  multi_smtp_router_p7_domain_swap_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p7_domain_swap_targets:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p7_domain_swap_html_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p7_domain_swap_text_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p7_domain_swap_headers:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p7_domain_swap_message_id:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p7_domain_swap_everywhere:
+    default: false
+    client: false
+    type: bool
+
+  multi_smtp_router_p8_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p8_id:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p8_weight_percent:
+    default: 0
+    client: false
+    type: integer
+    min: 0
+    max: 100
+  multi_smtp_router_p8_from_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p8_reply_to_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p8_smtp_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p8_smtp_port:
+    default: 587
+    client: false
+    type: integer
+    min: 1
+    max: 65535
+  multi_smtp_router_p8_smtp_username:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p8_smtp_password:
+    default: ""
+    client: false
+    type: password
+  multi_smtp_router_p8_smtp_authentication_mode:
+    default: plain
+    client: false
+    type: enum
+    choices:
+      - plain
+      - login
+      - cram_md5
+  multi_smtp_router_p8_smtp_enable_starttls_auto:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p8_smtp_ssl:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p8_smtp_tls:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p8_smtp_domain:
+    default: ""
+    client: false
+    type: text
+  # Verification pool filter for provider 8 (comma-separated statuses; empty = accept any)
+  multi_smtp_router_p8_allowed_verification_statuses:
+    default: ""
+    client: false
+    type: text
+  # Domain swap for provider 8
+  multi_smtp_router_p8_domain_swap_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p8_domain_swap_targets:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p8_domain_swap_html_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p8_domain_swap_text_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p8_domain_swap_headers:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p8_domain_swap_message_id:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p8_domain_swap_everywhere:
     default: false
     client: false
     type: bool
