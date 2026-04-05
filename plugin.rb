@@ -992,25 +992,47 @@ after_initialize do
     def self.ds_swap_message_id!(message, target)
       return unless message.respond_to?(:header) && message.header
 
-      hdr = message.header["Message-Id"] || message.header["Message-ID"]
-      return unless hdr
+      # Optionally force lazy generation before reading, same trick as campaigns plugin.
+      # Needed for email types where ActionMailer generates Message-ID on first access.
+      if SiteSetting.multi_smtp_router_domain_swap_message_id_force_generate rescue false
+        _ = message.message_id if message.respond_to?(:message_id)
+      end
 
-      old_val = (hdr.respond_to?(:value) ? hdr.value : hdr.to_s).to_s.strip
-      return if old_val.empty?
+      fields = message.header.fields.select do |f|
+        f.name.to_s.casecmp?("Message-ID") || f.name.to_s.casecmp?("Message-Id")
+      end
+      fields = [message.header["Message-ID"]].compact if fields.empty? && message.header["Message-ID"]
+      return if fields.empty?
 
-      m = old_val.match(/<([^<>@\s]+)@([^<>@\s]+)>/)
-      return unless m
+      fields.each do |f|
+        old_val = (f.respond_to?(:value) ? f.value : f.to_s).to_s.strip
+        next if old_val.empty?
 
-      new_host = ds_rewrite_host(m[2].to_s, target)
-      return unless new_host
+        m = old_val.match(/<([^<>@\s]+)@([^<>@\s]+)>/)
+        next unless m
 
-      new_val = old_val.sub(
-        /<#{Regexp.escape(m[1])}@#{Regexp.escape(m[2])}>/,
-        "<#{m[1]}@#{new_host}>"
-      )
-      return if new_val == old_val
+        new_host = ds_rewrite_host(m[2].to_s, target)
+        next unless new_host
 
-      message.header["Message-ID"] = new_val
+        new_val = old_val.sub(
+          /<#{Regexp.escape(m[1])}@#{Regexp.escape(m[2])}>/,
+          "<#{m[1]}@#{new_host}>"
+        )
+        next if new_val == old_val
+
+        begin
+          f.value = new_val
+        rescue
+          message.header["Message-ID"] = new_val
+        end
+
+        if message.respond_to?(:message_id=)
+          begin
+            message.message_id = new_val
+          rescue
+          end
+        end
+      end
     rescue => e
       warn("domain_swap message_id failed: #{e.class}: #{e.message}")
     end
