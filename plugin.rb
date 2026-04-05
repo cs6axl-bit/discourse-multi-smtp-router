@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 # name: discourse-multi-smtp-router
-# about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table.
-# version: 2.5.1
+# about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table. Supports per-provider domain swap.
+# version: 2.6.0
 # authors: you
 # required_version: 3.0.0
 
@@ -613,6 +613,317 @@ after_initialize do
     rescue => e
       warn("log enqueue failed: #{e.class}: #{e.message}")
     end
+
+    # ============================================================
+    # Per-provider domain swap
+    # ============================================================
+
+    DS_TEXT_URL_REGEX = %r{https?://[^\s<>"'()]+}i
+
+    DS_HEADERS_TO_SWAP = %w[
+      List-Unsubscribe
+      List-Help
+      List-Subscribe
+      List-Owner
+    ].freeze
+
+    def self.provider_domain_swap_config(slot)
+      i = slot.to_i
+      {
+        enabled:    SiteSetting.public_send("multi_smtp_router_p#{i}_domain_swap_enabled"),
+        targets:    SiteSetting.public_send("multi_smtp_router_p#{i}_domain_swap_targets").to_s,
+        html_links: SiteSetting.public_send("multi_smtp_router_p#{i}_domain_swap_html_links"),
+        text_links: SiteSetting.public_send("multi_smtp_router_p#{i}_domain_swap_text_links"),
+        headers:    SiteSetting.public_send("multi_smtp_router_p#{i}_domain_swap_headers"),
+        message_id: SiteSetting.public_send("multi_smtp_router_p#{i}_domain_swap_message_id"),
+        everywhere: SiteSetting.public_send("multi_smtp_router_p#{i}_domain_swap_everywhere"),
+      }
+    rescue => e
+      warn("provider_domain_swap_config slot=#{slot} failed: #{e.class}: #{e.message}")
+      { enabled: false }
+    end
+
+    def self.ds_origin_host
+      URI.parse(Discourse.base_url.to_s).host.to_s.strip.downcase
+    rescue
+      ""
+    end
+
+    def self.ds_normalize_host(s)
+      x = s.to_s.strip
+      return "" if x.empty?
+      x = x.sub(%r{\Ahttps?://}i, "")
+      x = x.split("/").first.to_s
+      x = x.split("?").first.to_s
+      x = x.split("#").first.to_s
+      x.downcase
+    rescue
+      ""
+    end
+
+    def self.ds_pick_target(targets_str)
+      parts = targets_str.to_s.split(/[|\n,]/).map(&:strip).reject(&:empty?)
+      return "" if parts.empty?
+      parts.sample.to_s
+    rescue
+      ""
+    end
+
+    def self.ds_rewrite_host(host, target)
+      h = host.to_s
+      return nil if h.empty?
+
+      o = ds_origin_host
+      t = ds_normalize_host(target)
+      return nil if o.empty? || t.empty?
+      return nil if ds_normalize_host(h) == t
+
+      h_lc = h.downcase
+      if h_lc == o
+        return target.to_s.strip
+      end
+
+      suffix = ".#{o}"
+      if h_lc.end_with?(suffix)
+        prefix = h[0, h.length - suffix.length]
+        return "#{prefix}.#{target.to_s.strip}"
+      end
+
+      nil
+    rescue
+      nil
+    end
+
+    def self.ds_rewrite_url(url_str, base, target)
+      u = url_str.to_s.strip
+      return nil if u.empty?
+      return nil if u.start_with?("mailto:", "tel:", "sms:", "#")
+
+      abs = u.start_with?("/") ? (base.to_s + u) : u
+
+      begin
+        uri = URI.parse(abs)
+      rescue
+        return nil
+      end
+
+      return nil unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
+      return nil if uri.host.to_s.empty?
+
+      new_host = ds_rewrite_host(uri.host, target)
+      return nil unless new_host
+
+      uri.host = new_host
+      uri.to_s
+    rescue
+      nil
+    end
+
+    def self.ds_rewrite_srcset(srcset, base, target)
+      raw = srcset.to_s
+      return nil if raw.strip.empty?
+
+      parts = raw.split(",").map(&:strip).reject(&:empty?)
+      return nil if parts.empty?
+
+      changed = false
+      new_parts = parts.map do |p|
+        tokens = p.split(/\s+/, 2)
+        url  = tokens[0].to_s
+        rest = tokens.length > 1 ? tokens[1].to_s : ""
+
+        rewritten = ds_rewrite_url(url, base, target)
+        if rewritten
+          changed = true
+          rest.empty? ? rewritten : "#{rewritten} #{rest}"
+        else
+          p
+        end
+      end
+
+      changed ? new_parts.join(", ") : nil
+    rescue
+      nil
+    end
+
+    def self.ds_swap_html!(message, base, target, cfg)
+      return unless message.respond_to?(:html_part) && message.html_part
+
+      hp   = message.html_part
+      html = hp.body&.decoded
+      return if html.nil? || html.empty?
+
+      begin
+        doc     = Nokogiri::HTML::Document.parse(html)
+        changed = false
+
+        if cfg[:html_links] || cfg[:everywhere]
+          doc.css("a[href]").each do |a|
+            new_url = ds_rewrite_url(a["href"].to_s, base, target)
+            next unless new_url
+            a["href"] = new_url
+            changed = true
+          end
+        end
+
+        if cfg[:everywhere]
+          [
+            ["img[src]",      "src"],
+            ["img[data-src]", "data-src"],
+            ["source[src]",   "src"],
+            ["video[src]",    "src"],
+            ["audio[src]",    "src"],
+            ["iframe[src]",   "src"],
+            ["link[href]",    "href"],
+            ["form[action]",  "action"],
+            ["video[poster]", "poster"],
+          ].each do |sel, attr|
+            doc.css(sel).each do |node|
+              new_url = ds_rewrite_url(node[attr].to_s, base, target)
+              next unless new_url
+              node[attr] = new_url
+              changed = true
+            end
+          end
+
+          doc.css("img[srcset],source[srcset]").each do |node|
+            new_srcset = ds_rewrite_srcset(node["srcset"].to_s, base, target)
+            next unless new_srcset
+            node["srcset"] = new_srcset
+            changed = true
+          end
+        end
+
+        hp.body = doc.to_html if changed
+      rescue => e
+        warn("domain_swap html failed: #{e.class}: #{e.message}")
+      end
+    end
+
+    def self.ds_strip_trailing_punct(url)
+      u      = url.to_s
+      suffix = +""
+      while u.length > 0 && u[-1].match?(/[)\].,;:!?]/)
+        suffix.prepend(u[-1])
+        u = u[0..-2]
+      end
+      [u, suffix]
+    rescue
+      [url.to_s, ""]
+    end
+
+    def self.ds_swap_text_url(url, target)
+      core, suffix = ds_strip_trailing_punct(url)
+
+      begin
+        uri = URI.parse(core)
+      rescue
+        return url
+      end
+
+      return url unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
+      return url if uri.host.to_s.empty?
+
+      new_host = ds_rewrite_host(uri.host, target)
+      return url unless new_host
+
+      uri.host = new_host
+      uri.to_s + suffix
+    rescue
+      url
+    end
+
+    def self.ds_swap_text!(message, target)
+      return unless message.respond_to?(:text_part) && message.text_part
+
+      tp   = message.text_part
+      text = tp.body&.decoded
+      return if text.nil? || text.empty?
+
+      changed = false
+      out = text.to_s.gsub(DS_TEXT_URL_REGEX) do |found|
+        swapped = ds_swap_text_url(found, target)
+        changed = true if swapped != found
+        swapped
+      end
+
+      tp.body = out if changed
+    rescue => e
+      warn("domain_swap text failed: #{e.class}: #{e.message}")
+    end
+
+    def self.ds_swap_headers!(message, target)
+      return unless message.respond_to?(:header) && message.header
+
+      DS_HEADERS_TO_SWAP.each do |hname|
+        begin
+          fields = message.header.fields.select { |f| f.name.to_s.casecmp?(hname) }
+          next if fields.empty?
+
+          fields.each do |f|
+            old_val = f.value.to_s
+            next if old_val.strip.empty?
+
+            new_val = old_val.gsub(DS_TEXT_URL_REGEX) { |u| ds_swap_text_url(u, target) }
+            next if new_val == old_val
+
+            f.value = new_val
+          end
+        rescue
+          next
+        end
+      end
+    rescue => e
+      warn("domain_swap headers failed: #{e.class}: #{e.message}")
+    end
+
+    def self.ds_swap_message_id!(message, target)
+      return unless message.respond_to?(:header) && message.header
+
+      hdr = message.header["Message-Id"] || message.header["Message-ID"]
+      return unless hdr
+
+      old_val = (hdr.respond_to?(:value) ? hdr.value : hdr.to_s).to_s.strip
+      return if old_val.empty?
+
+      m = old_val.match(/<([^<>@\s]+)@([^<>@\s]+)>/)
+      return unless m
+
+      new_host = ds_rewrite_host(m[2].to_s, target)
+      return unless new_host
+
+      new_val = old_val.sub(
+        /<#{Regexp.escape(m[1])}@#{Regexp.escape(m[2])}>/,
+        "<#{m[1]}@#{new_host}>"
+      )
+      return if new_val == old_val
+
+      message.header["Message-ID"] = new_val
+    rescue => e
+      warn("domain_swap message_id failed: #{e.class}: #{e.message}")
+    end
+
+    def self.process_domain_swap!(message, provider)
+      return unless provider
+
+      cfg = provider_domain_swap_config(provider[:slot])
+      return unless cfg[:enabled]
+
+      target = ds_pick_target(cfg[:targets])
+      return if target.empty?
+
+      base = Discourse.base_url.to_s
+
+      ds_swap_html!(message, base, target, cfg)
+      ds_swap_text!(message, target)       if cfg[:text_links] || cfg[:everywhere]
+      ds_swap_headers!(message, target)    if cfg[:headers]
+      ds_swap_message_id!(message, target) if cfg[:message_id]
+
+      debug("domain_swap applied provider_id=#{provider[:id]} target=#{target}")
+    rescue => e
+      warn("process_domain_swap! failed: #{e.class}: #{e.message}")
+    end
+
   end
 
   # ---------------------------
@@ -679,6 +990,7 @@ after_initialize do
         "uuid=#{uuid} applied provider_id=#{provider[:id]} from=#{provider[:from_address].inspect} reply_to=#{provider[:reply_to_address].inspect} " \
         "settings_after=#{::MultiSmtpRouter.safe_settings_snapshot(message&.delivery_method&.settings).inspect}"
       )
+      ::MultiSmtpRouter.process_domain_swap!(message, provider)
     else
       ::MultiSmtpRouter.debug("uuid=#{uuid} no provider chosen reason=#{reason} (default SMTP will be used)")
     end
