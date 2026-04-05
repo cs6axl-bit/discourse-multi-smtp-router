@@ -157,6 +157,35 @@ plugins:
     default: ""
     client: false
     type: text
+  # Domain swap for provider 1
+  multi_smtp_router_p1_domain_swap_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p1_domain_swap_targets:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p1_domain_swap_html_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p1_domain_swap_text_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p1_domain_swap_headers:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p1_domain_swap_message_id:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p1_domain_swap_everywhere:
+    default: false
+    client: false
+    type: bool
 
   multi_smtp_router_p2_enabled:
     default: false
@@ -222,6 +251,35 @@ plugins:
     default: ""
     client: false
     type: text
+  # Domain swap for provider 2
+  multi_smtp_router_p2_domain_swap_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p2_domain_swap_targets:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p2_domain_swap_html_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p2_domain_swap_text_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p2_domain_swap_headers:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p2_domain_swap_message_id:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p2_domain_swap_everywhere:
+    default: false
+    client: false
+    type: bool
 
   multi_smtp_router_p3_enabled:
     default: false
@@ -287,6 +345,35 @@ plugins:
     default: ""
     client: false
     type: text
+  # Domain swap for provider 3
+  multi_smtp_router_p3_domain_swap_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p3_domain_swap_targets:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p3_domain_swap_html_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p3_domain_swap_text_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p3_domain_swap_headers:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p3_domain_swap_message_id:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p3_domain_swap_everywhere:
+    default: false
+    client: false
+    type: bool
 
   multi_smtp_router_p4_enabled:
     default: false
@@ -352,6 +439,35 @@ plugins:
     default: ""
     client: false
     type: text
+  # Domain swap for provider 4
+  multi_smtp_router_p4_domain_swap_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p4_domain_swap_targets:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p4_domain_swap_html_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p4_domain_swap_text_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p4_domain_swap_headers:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p4_domain_swap_message_id:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p4_domain_swap_everywhere:
+    default: false
+    client: false
+    type: bool
 
   multi_smtp_router_p5_enabled:
     default: false
@@ -417,6 +533,35 @@ plugins:
     default: ""
     client: false
     type: text
+  # Domain swap for provider 5
+  multi_smtp_router_p5_domain_swap_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p5_domain_swap_targets:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p5_domain_swap_html_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p5_domain_swap_text_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p5_domain_swap_headers:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p5_domain_swap_message_id:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p5_domain_swap_everywhere:
+    default: false
+    client: false
+    type: bool
 
   multi_smtp_router_p6_enabled:
     default: false
@@ -482,3 +627,32 @@ plugins:
     default: ""
     client: false
     type: text
+  # Domain swap for provider 6
+  multi_smtp_router_p6_domain_swap_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p6_domain_swap_targets:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p6_domain_swap_html_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p6_domain_swap_text_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p6_domain_swap_headers:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p6_domain_swap_message_id:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p6_domain_swap_everywhere:
+    default: false
+    client: false
+    type: bool
