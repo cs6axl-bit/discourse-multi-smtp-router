@@ -994,9 +994,12 @@ after_initialize do
 
       # Optionally force lazy generation before reading (needed for some email types
       # where ActionMailer generates Message-ID on first access via .message_id).
-      if SiteSetting.multi_smtp_router_domain_swap_message_id_force_generate rescue false
-        _ = message.message_id if message.respond_to?(:message_id)
+      force_generate = begin
+        SiteSetting.multi_smtp_router_domain_swap_message_id_force_generate
+      rescue
+        false
       end
+      _ = message.message_id if force_generate && message.respond_to?(:message_id)
 
       # Use .to_s on the header field (not .value) — triggers full encoding/lazy generation.
       # Falls back to header["Message-ID"] if field enumeration yields nothing.
