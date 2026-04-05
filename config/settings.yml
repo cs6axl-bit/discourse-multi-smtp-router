@@ -65,6 +65,12 @@ plugins:
     client: false
     type: list
 
+  # Force Message-ID generation before swapping (use if Message-ID swap is unreliable for some email types)
+  multi_smtp_router_domain_swap_message_id_force_generate:
+    default: false
+    client: false
+    type: bool
+
   # --------------------
   # Email verification-based pool filtering
   # --------------------
