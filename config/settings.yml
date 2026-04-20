@@ -55,6 +55,14 @@ plugins:
     min: 0
     max: 100
 
+  # Top N% of ranked providers (by click/open) to sample from. Default 50 = top half.
+  multi_smtp_router_domain_metrics_top_percent:
+    default: 50
+    client: false
+    type: integer
+    min: 1
+    max: 100
+
   # Domain override pairs (list)
   # Example lines:
   #   gmail.com=mailgun
