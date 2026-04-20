@@ -104,6 +104,16 @@ after_initialize do
       0
     end
 
+    # Top-N% of ranked providers to sample from (1-100; default 50 = top half)
+    def self.domain_metrics_top_percent
+      v = (SiteSetting.multi_smtp_router_domain_metrics_top_percent || 50).to_i
+      v = 1   if v < 1
+      v = 100 if v > 100
+      v
+    rescue
+      50
+    end
+
     def self.log_to_endpoint_enabled?
       SiteSetting.multi_smtp_router_log_to_endpoint_enabled
     end
@@ -442,16 +452,16 @@ after_initialize do
         # Rank: click_percent (primary) then open_percent (secondary)
         rows_sorted = rows.sort_by { |r| [-r[:click_percent].to_f, -r[:open_percent].to_f] }
 
-        # Top 50% (ceil). Ensure at least 1.
-        top_n = (rows_sorted.length / 2.0).ceil
-        top_n = 1 if top_n < 1
+        # Top N% (ceil). Ensure at least 1.
+        top_pct = domain_metrics_top_percent
+        top_n = [(rows_sorted.length * top_pct / 100.0).ceil, 1].max
 
         top_rows = rows_sorted.first(top_n)
         chosen = top_rows.sample
 
         provider = find_provider_by_id(chosen[:provider_id])
         if provider
-          reason = "metrics_top50(domain=#{domain} top_n=#{top_n} total=#{rows_sorted.length})"
+          reason = "metrics_top#{top_pct}pct(domain=#{domain} top_n=#{top_n} total=#{rows_sorted.length})"
           return [provider, reason]
         else
           warn("metrics chose provider_id=#{chosen[:provider_id]} but provider not active anymore")
