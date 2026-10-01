@@ -2,7 +2,7 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table. Supports per-provider domain swap.
-# version: 2.6.0
+# version: 2.7.0
 # authors: you
 # required_version: 3.0.0
 
@@ -25,6 +25,11 @@ after_initialize do
     HDR_PROVIDER_WEIGHT = "X-Multi-SMTP-Router-Provider-Weight"
     HDR_ROUTING_REASON  = "X-Multi-SMTP-Router-Routing-Reason"
     HDR_ROUTING_UUID    = "X-Multi-SMTP-Router-UUID"
+
+    # Headers other plugins can SET to constrain the provider for one message
+    # (comma-separated provider ids). Read + stripped in before_email_send.
+    HDR_ONLY_PROVIDERS  = "X-Multi-SMTP-Router-Only-Providers"
+    HDR_AVOID_PROVIDERS = "X-Multi-SMTP-Router-Avoid-Providers"
 
     METRICS_TABLE = "public.digest_provider_domain_metrics"
 
@@ -489,9 +494,22 @@ after_initialize do
     # --------------------
     # Routing decision
     # --------------------
-    def self.choose_provider(message)
+    # `constraints` (from extract_campaign_constraints!) narrows the pool for this message:
+    #   only:  ids the provider must be one of (empty = no restriction)
+    #   avoid: ids the provider must not be
+    # When constraints are present a provider is always chosen from the pool (never the
+    # default SMTP), or the reason starts with "campaign_providers_no_pool" and the send is skipped.
+    def self.choose_provider(message, constraints = nil)
       list = providers
       return [nil, "no_enabled_providers"] if list.empty?
+
+      constrained = campaign_constraints?(constraints)
+      if constrained
+        list = filter_providers_by_constraints(list, constraints)
+        if list.empty?
+          return [nil, "campaign_providers_no_pool(#{constraints_summary(constraints)})"]
+        end
+      end
 
       # Filter pool by email verification status
       if verification_enabled?
@@ -506,6 +524,21 @@ after_initialize do
         end
       end
 
+      p, reason = choose_provider_from_pool(message, list, constrained)
+
+      if constrained
+        if p.nil?
+          # weighted total 0 / no routing mode enabled: still must use an allowed provider
+          p = list.sample
+          reason = "campaign_providers_random(after=#{reason})"
+        end
+        reason = "#{reason} campaign_pool=#{list.map { |x| x[:id] }.join(',')}"
+      end
+
+      [p, reason]
+    end
+
+    def self.choose_provider_from_pool(message, list, constrained)
       domains = extract_recipient_domains(message)
 
       # 1) Domain override wins
@@ -515,6 +548,11 @@ after_initialize do
           domains.each do |d|
             pid = map[d]
             next if pid.nil? || pid.to_s.strip.empty?
+
+            if constrained && list.none? { |x| x[:id].to_s == pid.to_s.strip }
+              debug("domain_override #{d}->#{pid} skipped: provider not allowed by campaign constraints")
+              next
+            end
 
             p = find_provider_by_id(pid)
             return [p, "domain_override(#{d}->#{pid})"] if p
@@ -546,6 +584,66 @@ after_initialize do
       end
 
       [nil, "no_routing_logic_enabled"]
+    end
+
+    # --------------------
+    # Per-message provider constraints (set by other plugins, e.g. digest-campaigns)
+    # --------------------
+    # Discourse's Email::Sender calls message.deliver!, which ignores perform_deliveries,
+    # so swap in a delivery method that does nothing to really drop the message.
+    class NullDelivery
+      attr_accessor :settings
+
+      def initialize(settings = {})
+        @settings = settings || {}
+      end
+
+      def deliver!(_mail)
+        nil
+      end
+    end
+
+    def self.block_delivery!(message)
+      message.perform_deliveries = false
+      message.delivery_method(NullDelivery)
+    end
+
+    def self.parse_provider_id_header(value)
+      value.to_s.split(/[\n,|]+/).map(&:strip).reject(&:empty?).uniq
+    end
+
+    # Reads the constraint headers and REMOVES them so they never reach the recipient.
+    def self.extract_campaign_constraints!(message)
+      return nil if message.nil?
+
+      only_raw  = message.header[HDR_ONLY_PROVIDERS]&.value
+      avoid_raw = message.header[HDR_AVOID_PROVIDERS]&.value
+
+      message.header[HDR_ONLY_PROVIDERS]  = nil
+      message.header[HDR_AVOID_PROVIDERS] = nil
+
+      { only: parse_provider_id_header(only_raw), avoid: parse_provider_id_header(avoid_raw) }
+    rescue => e
+      warn("extract_campaign_constraints failed: #{e.class}: #{e.message}")
+      nil
+    end
+
+    def self.campaign_constraints?(constraints)
+      constraints.is_a?(Hash) && (Array(constraints[:only]).any? || Array(constraints[:avoid]).any?)
+    end
+
+    def self.filter_providers_by_constraints(list, constraints)
+      only  = Array(constraints[:only]).map(&:to_s)
+      avoid = Array(constraints[:avoid]).map(&:to_s)
+
+      list.select do |p|
+        id = p[:id].to_s
+        (only.empty? || only.include?(id)) && !avoid.include?(id)
+      end
+    end
+
+    def self.constraints_summary(constraints)
+      "only=#{Array(constraints[:only]).join(',')} avoid=#{Array(constraints[:avoid]).join(',')}"
     end
 
     # --------------------
@@ -1118,7 +1216,12 @@ after_initialize do
 
     ::MultiSmtpRouter.debug("uuid=#{uuid} type=#{type} to=#{to_list.inspect} domains=#{domains.inspect}")
 
-    provider, reason = ::MultiSmtpRouter.choose_provider(message)
+    constraints = ::MultiSmtpRouter.extract_campaign_constraints!(message)
+    if ::MultiSmtpRouter.campaign_constraints?(constraints)
+      ::MultiSmtpRouter.debug("uuid=#{uuid} campaign constraints #{::MultiSmtpRouter.constraints_summary(constraints)}")
+    end
+
+    provider, reason = ::MultiSmtpRouter.choose_provider(message, constraints)
 
     # If weighted enabled but total weight == 0, optionally fall back to random if random switch is on
     if provider.nil? && reason == "weighted_enabled_but_total_weight_zero"
@@ -1136,7 +1239,16 @@ after_initialize do
 
     if reason&.start_with?("verification_no_pool")
       ::MultiSmtpRouter.warn("uuid=#{uuid} skipping send: #{reason}")
-      message.perform_deliveries = false
+      ::MultiSmtpRouter.block_delivery!(message)
+      next
+    end
+
+    # Constrained message with no allowed provider: never fall back to the default SMTP.
+    # The reason header lets the sender (digest-campaigns) see why nothing went out.
+    if reason&.start_with?("campaign_providers_no_pool")
+      ::MultiSmtpRouter.warn("uuid=#{uuid} skipping send: #{reason}")
+      ::MultiSmtpRouter.stamp_headers!(message, uuid: uuid, provider: nil, reason: reason)
+      ::MultiSmtpRouter.block_delivery!(message)
       next
     end
 
@@ -1173,5 +1285,14 @@ after_initialize do
     )
   rescue => e
     ::MultiSmtpRouter.warn("before_email_send failed: #{e.class}: #{e.message}")
+
+    # A constrained message must not silently go out via the default SMTP.
+    if ::MultiSmtpRouter.campaign_constraints?(constraints) && provider.nil?
+      begin
+        ::MultiSmtpRouter.stamp_headers!(message, uuid: uuid, provider: nil, reason: "campaign_providers_no_pool(error=#{e.class})")
+        ::MultiSmtpRouter.block_delivery!(message)
+      rescue
+      end
+    end
   end
 end
