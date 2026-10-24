@@ -13,6 +13,8 @@ en:
     multi_smtp_router_p6_allow_nutra: "Provider 6: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
     multi_smtp_router_p7_allow_nutra: "Provider 7: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
     multi_smtp_router_p8_allow_nutra: "Provider 8: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
+    multi_smtp_router_p9_allow_nutra: "Provider 9: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Default OFF for this new slot: tick it only for ESPs that accept nutra."
+    multi_smtp_router_p10_allow_nutra: "Provider 10: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Default OFF for this new slot: tick it only for ESPs that accept nutra."
     multi_smtp_router_debug_log_enabled: "Enable debug logs to Rails log"
     multi_smtp_router_random_enabled: "Enable equal random among enabled providers"
     multi_smtp_router_weighted_enabled: "Enable weighted provider selection (uses weight % per provider)"

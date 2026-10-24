@@ -975,3 +975,207 @@ plugins:
     default: false
     client: false
     type: bool
+
+  multi_smtp_router_p9_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p9_id:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p9_weight_percent:
+    default: 0
+    client: false
+    type: integer
+    min: 0
+    max: 100
+  multi_smtp_router_p9_from_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p9_reply_to_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p9_smtp_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p9_smtp_port:
+    default: 587
+    client: false
+    type: integer
+    min: 1
+    max: 65535
+  multi_smtp_router_p9_smtp_username:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p9_smtp_password:
+    default: ""
+    client: false
+    type: password
+  multi_smtp_router_p9_smtp_authentication_mode:
+    default: plain
+    client: false
+    type: enum
+    choices:
+      - plain
+      - login
+      - cram_md5
+  multi_smtp_router_p9_smtp_enable_starttls_auto:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p9_smtp_ssl:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p9_smtp_tls:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p9_smtp_domain:
+    default: ""
+    client: false
+    type: text
+  # Verification pool filter for provider 9 (comma-separated statuses; empty = accept any)
+  multi_smtp_router_p9_allowed_verification_statuses:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p9_allow_nutra:
+    default: false
+    client: false
+  # Domain swap for provider 9
+  multi_smtp_router_p9_domain_swap_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p9_domain_swap_targets:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p9_domain_swap_html_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p9_domain_swap_text_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p9_domain_swap_headers:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p9_domain_swap_message_id:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p9_domain_swap_everywhere:
+    default: false
+    client: false
+    type: bool
+
+  multi_smtp_router_p10_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p10_id:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p10_weight_percent:
+    default: 0
+    client: false
+    type: integer
+    min: 0
+    max: 100
+  multi_smtp_router_p10_from_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p10_reply_to_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p10_smtp_address:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p10_smtp_port:
+    default: 587
+    client: false
+    type: integer
+    min: 1
+    max: 65535
+  multi_smtp_router_p10_smtp_username:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p10_smtp_password:
+    default: ""
+    client: false
+    type: password
+  multi_smtp_router_p10_smtp_authentication_mode:
+    default: plain
+    client: false
+    type: enum
+    choices:
+      - plain
+      - login
+      - cram_md5
+  multi_smtp_router_p10_smtp_enable_starttls_auto:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p10_smtp_ssl:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p10_smtp_tls:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p10_smtp_domain:
+    default: ""
+    client: false
+    type: text
+  # Verification pool filter for provider 10 (comma-separated statuses; empty = accept any)
+  multi_smtp_router_p10_allowed_verification_statuses:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p10_allow_nutra:
+    default: false
+    client: false
+  # Domain swap for provider 10
+  multi_smtp_router_p10_domain_swap_enabled:
+    default: false
+    client: false
+    type: bool
+  multi_smtp_router_p10_domain_swap_targets:
+    default: ""
+    client: false
+    type: text
+  multi_smtp_router_p10_domain_swap_html_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p10_domain_swap_text_links:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p10_domain_swap_headers:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p10_domain_swap_message_id:
+    default: true
+    client: false
+    type: bool
+  multi_smtp_router_p10_domain_swap_everywhere:
+    default: false
+    client: false
+    type: bool
