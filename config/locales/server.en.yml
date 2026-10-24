@@ -2,6 +2,16 @@
 en:
   site_settings:
     multi_smtp_router_enabled: "Enable multi SMTP router"
+    multi_smtp_router_nutra_guard_enabled: "Nutra guard: an email whose links (incl. decoded /content?u= redirect links) go to a nutra affiliate host is routed ONLY to providers with allow nutra ticked. No allowed provider = the email is not sent."
+    multi_smtp_router_nutra_link_hosts: "Hosts that make an email nutra (the host or any subdomain; * = letters / digits, e.g. mweb*.com). Defaults: ClickBank, MaxWeb, Digistore24, BuyGoods."
+    multi_smtp_router_p1_allow_nutra: "Provider 1: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
+    multi_smtp_router_p2_allow_nutra: "Provider 2: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
+    multi_smtp_router_p3_allow_nutra: "Provider 3: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
+    multi_smtp_router_p4_allow_nutra: "Provider 4: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
+    multi_smtp_router_p5_allow_nutra: "Provider 5: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
+    multi_smtp_router_p6_allow_nutra: "Provider 6: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
+    multi_smtp_router_p7_allow_nutra: "Provider 7: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
+    multi_smtp_router_p8_allow_nutra: "Provider 8: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
     multi_smtp_router_debug_log_enabled: "Enable debug logs to Rails log"
     multi_smtp_router_random_enabled: "Enable equal random among enabled providers"
     multi_smtp_router_weighted_enabled: "Enable weighted provider selection (uses weight % per provider)"

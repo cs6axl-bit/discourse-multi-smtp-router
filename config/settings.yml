@@ -1,6 +1,14 @@
 # config/settings.yml
 
 plugins:
+  multi_smtp_router_nutra_guard_enabled:
+    default: true
+    client: false
+  multi_smtp_router_nutra_link_hosts:
+    default: "clickbank.net|clickbank.com|maxwebconnect.com|mwebqiro.com|mweb*.com|maxweb*.com|digistore24.com|checkout-ds24.com|buygoods.com"
+    client: false
+    type: list
+    list_type: simple
   multi_smtp_router_enabled:
     default: false
     client: false
@@ -217,6 +225,9 @@ plugins:
     default: ""
     client: false
     type: text
+  multi_smtp_router_p1_allow_nutra:
+    default: true
+    client: false
   # Domain swap for provider 1
   multi_smtp_router_p1_domain_swap_enabled:
     default: false
@@ -316,6 +327,9 @@ plugins:
     default: ""
     client: false
     type: text
+  multi_smtp_router_p2_allow_nutra:
+    default: true
+    client: false
   # Domain swap for provider 2
   multi_smtp_router_p2_domain_swap_enabled:
     default: false
@@ -415,6 +429,9 @@ plugins:
     default: ""
     client: false
     type: text
+  multi_smtp_router_p3_allow_nutra:
+    default: true
+    client: false
   # Domain swap for provider 3
   multi_smtp_router_p3_domain_swap_enabled:
     default: false
@@ -514,6 +531,9 @@ plugins:
     default: ""
     client: false
     type: text
+  multi_smtp_router_p4_allow_nutra:
+    default: true
+    client: false
   # Domain swap for provider 4
   multi_smtp_router_p4_domain_swap_enabled:
     default: false
@@ -613,6 +633,9 @@ plugins:
     default: ""
     client: false
     type: text
+  multi_smtp_router_p5_allow_nutra:
+    default: true
+    client: false
   # Domain swap for provider 5
   multi_smtp_router_p5_domain_swap_enabled:
     default: false
@@ -712,6 +735,9 @@ plugins:
     default: ""
     client: false
     type: text
+  multi_smtp_router_p6_allow_nutra:
+    default: true
+    client: false
   # Domain swap for provider 6
   multi_smtp_router_p6_domain_swap_enabled:
 
@@ -812,6 +838,9 @@ plugins:
     default: ""
     client: false
     type: text
+  multi_smtp_router_p7_allow_nutra:
+    default: true
+    client: false
   # Domain swap for provider 7
   multi_smtp_router_p7_domain_swap_enabled:
     default: false
@@ -911,6 +940,9 @@ plugins:
     default: ""
     client: false
     type: text
+  multi_smtp_router_p8_allow_nutra:
+    default: true
+    client: false
   # Domain swap for provider 8
   multi_smtp_router_p8_domain_swap_enabled:
     default: false

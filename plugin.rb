@@ -2,13 +2,15 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table. Supports per-provider domain swap.
-# version: 2.7.0
+# version: 2.8.0
 # authors: you
 # required_version: 3.0.0
 
 enabled_site_setting :multi_smtp_router_enabled
 
 after_initialize do
+  require "base64"
+  require "cgi"
   require "net/http"
   require "uri"
   require "json"
@@ -205,6 +207,13 @@ after_initialize do
           smtp[:tls] = true if tls
           smtp[:domain] = helo_domain unless helo_domain.empty?
 
+          allow_nutra =
+            begin
+              SiteSetting.public_send("multi_smtp_router_p#{i}_allow_nutra") ? true : false
+            rescue
+              true
+            end
+
           allowed_statuses = SiteSetting
             .public_send("multi_smtp_router_p#{i}_allowed_verification_statuses")
             .to_s.split(",").map(&:strip).reject(&:empty?)
@@ -216,7 +225,8 @@ after_initialize do
             from_address: from_addr,
             reply_to_address: reply_to,
             smtp: smtp,
-            allowed_verification_statuses: allowed_statuses
+            allowed_verification_statuses: allowed_statuses,
+            allow_nutra: allow_nutra
           }
         rescue => e
           warn("provider slot #{i} read failed: #{e.class}: #{e.message}")
@@ -224,6 +234,68 @@ after_initialize do
       end
 
       out
+    end
+
+    # --------------------
+    # Nutra guard (v2.8.0, owner 2026-10-24): some ESPs (SendPulse, SendGrid ...) forbid nutra affiliate offers
+    # (ClickBank, MaxWeb ...). An email whose links point to a nutra host is routed only among providers with
+    # pN_allow_nutra; none available = not sent. Links are read from the HTML + text parts; redirect links
+    # (any query value that base64url-decodes to an http(s) URL, e.g. /content?u=...) are decoded first.
+    # --------------------
+    def self.nutra_guard_enabled?
+      SiteSetting.respond_to?(:multi_smtp_router_nutra_guard_enabled) && SiteSetting.multi_smtp_router_nutra_guard_enabled
+    rescue
+      false
+    end
+
+    def self.nutra_host_regexes
+      raw = SiteSetting.respond_to?(:multi_smtp_router_nutra_link_hosts) ? SiteSetting.multi_smtp_router_nutra_link_hosts.to_s : ""
+      raw.split(/[|,\s]+/).map { |h| h.strip.downcase.sub(/\A\*?\./, "") }.reject(&:empty?).uniq.map do |h|
+        body = Regexp.escape(h).gsub("\\*", "[a-z0-9-]*")
+        Regexp.new("(\\A|\\.)#{body}\\z")
+      end
+    rescue => e
+      warn("nutra_host_regexes failed: #{e.class}: #{e.message}")
+      []
+    end
+
+    def self.message_bodies(message)
+      parts = message.multipart? ? message.all_parts : [message]
+      parts.map { |p| (p.decoded rescue p.body.to_s).to_s }.reject(&:empty?)
+    rescue
+      [message.body.to_s]
+    end
+
+    def self.decode_wrapped_urls(url)
+      out = []
+      q = url.to_s.split("?", 2)[1].to_s
+      q.split("&").each do |kv|
+        _k, v = kv.split("=", 2)
+        next if v.to_s.length < 12
+        v = (CGI.unescape(v.to_s) rescue v.to_s)
+        dec = (Base64.urlsafe_decode64(v + ("=" * ((4 - v.length % 4) % 4))) rescue nil)
+        out << dec if dec.to_s =~ %r{\Ahttps?://}i
+        out << v if v =~ %r{\Ahttps?://}i
+      end
+      out
+    end
+
+    # returns the matched nutra host or nil
+    def self.nutra_host_in_message(message)
+      res = nutra_host_regexes
+      return nil if res.empty?
+      urls = []
+      message_bodies(message).each { |b| urls.concat(b.scan(%r{https?://[^\s"'<>)]+}i)) }
+      urls = urls.uniq.first(400).map { |u| u.gsub("&amp;", "&") }
+      (urls + urls.flat_map { |u| decode_wrapped_urls(u) }).each do |u|
+        host = (URI.parse(u).host.to_s.downcase rescue "")
+        next if host.empty?
+        return host if res.any? { |r| r.match?(host) }
+      end
+      nil
+    rescue => e
+      warn("nutra_host_in_message failed: #{e.class}: #{e.message}")
+      nil
     end
 
     def self.find_provider_by_id(id)
@@ -511,6 +583,18 @@ after_initialize do
         end
       end
 
+      # Nutra guard: only providers that allow nutra offers. Treated like a campaign constraint (domain override,
+      # metrics optimizer and fallbacks stay inside the pool; empty pool = the email is not sent).
+      nutra_tag = nil
+      if nutra_guard_enabled? && (nutra_host = nutra_host_in_message(message))
+        list = list.select { |x| x[:allow_nutra] != false }
+        if list.empty?
+          return [nil, "campaign_providers_no_pool(nutra=#{nutra_host} no provider allows nutra)"]
+        end
+        constrained = true
+        nutra_tag = " nutra=#{nutra_host}"
+      end
+
       # Filter pool by email verification status
       if verification_enabled?
         email  = Array(message&.to).first.to_s
@@ -532,7 +616,7 @@ after_initialize do
           p = list.sample
           reason = "campaign_providers_random(after=#{reason})"
         end
-        reason = "#{reason} campaign_pool=#{list.map { |x| x[:id] }.join(',')}"
+        reason = "#{reason} campaign_pool=#{list.map { |x| x[:id] }.join(',')}#{nutra_tag}"
       end
 
       [p, reason]
