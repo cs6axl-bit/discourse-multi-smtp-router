@@ -2,7 +2,7 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table. Supports per-provider domain swap.
-# version: 2.8.0
+# version: 2.8.1
 # authors: you
 # required_version: 3.0.0
 
@@ -266,36 +266,64 @@ after_initialize do
       [message.body.to_s]
     end
 
+    NUTRA_MAX_URLS = 3000
+    NUTRA_MAX_DEPTH = 3
+    NUTRA_DETECT_ERROR = "detect_error"
+
+    # Host from a URL string without URI.parse (which raises on {SUBID}, |, spaces … and would let a link slip).
+    def self.url_host(u)
+      m = u.to_s.match(%r{\A(?:https?:)?//(?:[^/?#@\s]*@)?([^/?#:\s\\]+)}i)
+      m ? m[1].downcase.sub(/\.\z/, "") : ""
+    end
+
+    # URLs hidden in query values: base64url (our /content?u=…) or percent-encoded http(s) URLs.
     def self.decode_wrapped_urls(url)
       out = []
-      q = url.to_s.split("?", 2)[1].to_s
-      q.split("&").each do |kv|
+      q = url.to_s.split("?", 2)[1].to_s.split("#", 2)[0].to_s
+      q.split(/[&;]/).each do |kv|
         _k, v = kv.split("=", 2)
-        next if v.to_s.length < 12
+        next if v.to_s.length < 8
         v = (CGI.unescape(v.to_s) rescue v.to_s)
-        dec = (Base64.urlsafe_decode64(v + ("=" * ((4 - v.length % 4) % 4))) rescue nil)
-        out << dec if dec.to_s =~ %r{\Ahttps?://}i
-        out << v if v =~ %r{\Ahttps?://}i
+        out << v if v =~ %r{\A(?:https?:)?//}i
+        next if v.length < 12
+        dec = (Base64.urlsafe_decode64(v.delete("=") + ("=" * ((4 - v.delete("=").length % 4) % 4))) rescue nil)
+        dec = dec.to_s.dup.force_encoding("UTF-8")
+        out << dec if dec.valid_encoding? && dec =~ %r{\Ahttps?://}i
       end
       out
     end
 
-    # returns the matched nutra host or nil
+    # Matched nutra host, NUTRA_DETECT_ERROR if detection itself failed (fail closed: treated as nutra), or nil.
     def self.nutra_host_in_message(message)
       res = nutra_host_regexes
       return nil if res.empty?
       urls = []
-      message_bodies(message).each { |b| urls.concat(b.scan(%r{https?://[^\s"'<>)]+}i)) }
-      urls = urls.uniq.first(400).map { |u| u.gsub("&amp;", "&") }
-      (urls + urls.flat_map { |u| decode_wrapped_urls(u) }).each do |u|
-        host = (URI.parse(u).host.to_s.downcase rescue "")
-        next if host.empty?
-        return host if res.any? { |r| r.match?(host) }
+      message_bodies(message).each do |b|
+        t = (CGI.unescapeHTML(b) rescue b)
+        urls.concat(t.scan(%r{https?://[^\s"'<>)\]]+}i))
+        urls.concat(t.scan(%r{(?:href|src)\s*=\s*["']?(//[^\s"'<>)]+)}i).flatten)
+      end
+      seen = {}
+      queue = urls.map { |u| [u.gsub("&amp;", "&"), 0] }
+      until queue.empty? || seen.size >= NUTRA_MAX_URLS
+        u, depth = queue.shift
+        next if seen[u]
+        seen[u] = true
+        host = url_host(u)
+        return host if !host.empty? && res.any? { |r| r.match?(host) }
+        decode_wrapped_urls(u).each { |w| queue << [w, depth + 1] } if depth < NUTRA_MAX_DEPTH
       end
       nil
     rescue => e
-      warn("nutra_host_in_message failed: #{e.class}: #{e.message}")
-      nil
+      warn("nutra_host_in_message failed (treated as nutra): #{e.class}: #{e.message}")
+      NUTRA_DETECT_ERROR
+    end
+
+    # Default SMTP (Discourse's own, used when the router picks no provider) may carry nutra?
+    def self.default_smtp_allows_nutra?
+      !SiteSetting.respond_to?(:multi_smtp_router_default_smtp_allow_nutra) || SiteSetting.multi_smtp_router_default_smtp_allow_nutra
+    rescue
+      true
     end
 
     def self.find_provider_by_id(id)
@@ -1295,6 +1323,8 @@ after_initialize do
     message, type = *params
 
     uuid = SecureRandom.uuid
+    provider_applied = false
+    provider = nil
     to_list = Array(message&.to).compact.map(&:to_s)
     domains = ::MultiSmtpRouter.extract_recipient_domains(message)
 
@@ -1336,9 +1366,21 @@ after_initialize do
       next
     end
 
+    # Nutra guard, last line: no provider chosen → Discourse's default SMTP would send it. Block a nutra email
+    # when the default SMTP is not allowed to carry nutra (multi_smtp_router_default_smtp_allow_nutra).
+    if provider.nil? && ::MultiSmtpRouter.nutra_guard_enabled? && !::MultiSmtpRouter.default_smtp_allows_nutra? &&
+       (nutra_host = ::MultiSmtpRouter.nutra_host_in_message(message))
+      reason = "campaign_providers_no_pool(nutra=#{nutra_host} default smtp not allowed; was #{reason})"
+      ::MultiSmtpRouter.warn("uuid=#{uuid} skipping send: #{reason}")
+      ::MultiSmtpRouter.stamp_headers!(message, uuid: uuid, provider: nil, reason: reason)
+      ::MultiSmtpRouter.block_delivery!(message)
+      next
+    end
+
     if provider
       ::MultiSmtpRouter.debug("uuid=#{uuid} chose provider_id=#{provider[:id]} slot=#{provider[:slot]} reason=#{reason} weight=#{provider[:weight_percent]}")
       ::MultiSmtpRouter.apply_provider!(message, provider)
+      provider_applied = true
       ::MultiSmtpRouter.debug(
         "uuid=#{uuid} applied provider_id=#{provider[:id]} from=#{provider[:from_address].inspect} reply_to=#{provider[:reply_to_address].inspect} " \
         "settings_after=#{::MultiSmtpRouter.safe_settings_snapshot(message&.delivery_method&.settings).inspect}"
@@ -1376,6 +1418,18 @@ after_initialize do
         ::MultiSmtpRouter.stamp_headers!(message, uuid: uuid, provider: nil, reason: "campaign_providers_no_pool(error=#{e.class})")
         ::MultiSmtpRouter.block_delivery!(message)
       rescue
+      end
+    # Nutra email and no allowed provider applied before the error: never let the default SMTP carry it
+    # unless the default SMTP is allowed to (multi_smtp_router_default_smtp_allow_nutra).
+    elsif !provider_applied
+      begin
+        if ::MultiSmtpRouter.nutra_guard_enabled? && !::MultiSmtpRouter.default_smtp_allows_nutra? &&
+           (nh = ::MultiSmtpRouter.nutra_host_in_message(message))
+          ::MultiSmtpRouter.stamp_headers!(message, uuid: uuid, provider: nil, reason: "campaign_providers_no_pool(nutra=#{nh} error=#{e.class})")
+          ::MultiSmtpRouter.block_delivery!(message)
+        end
+      rescue
+        ::MultiSmtpRouter.block_delivery!(message) rescue nil
       end
     end
   end

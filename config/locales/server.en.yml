@@ -3,6 +3,7 @@ en:
   site_settings:
     multi_smtp_router_enabled: "Enable multi SMTP router"
     multi_smtp_router_nutra_guard_enabled: "Nutra guard: an email whose links (incl. decoded /content?u= redirect links) go to a nutra affiliate host is routed ONLY to providers with allow nutra ticked. No allowed provider = the email is not sent."
+    multi_smtp_router_default_smtp_allow_nutra: "May Discourse's default SMTP (used when the router picks no provider: router error, no enabled providers, no routing mode) carry nutra emails? Untick if the default SMTP is a nutra-strict ESP: such emails are then blocked instead."
     multi_smtp_router_nutra_link_hosts: "Hosts that make an email nutra (the host or any subdomain; * = letters / digits, e.g. mweb*.com). Defaults: ClickBank, MaxWeb, Digistore24, BuyGoods."
     multi_smtp_router_p1_allow_nutra: "Provider 1: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."
     multi_smtp_router_p2_allow_nutra: "Provider 2: allowed to send nutra affiliate offers (ClickBank, MaxWeb ...). Untick for ESPs that forbid them (e.g. SendPulse, SendGrid)."

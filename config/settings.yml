@@ -4,6 +4,9 @@ plugins:
   multi_smtp_router_nutra_guard_enabled:
     default: true
     client: false
+  multi_smtp_router_default_smtp_allow_nutra:
+    default: true
+    client: false
   multi_smtp_router_nutra_link_hosts:
     default: "clickbank.net|clickbank.com|maxwebconnect.com|mwebqiro.com|mweb*.com|maxweb*.com|digistore24.com|checkout-ds24.com|buygoods.com"
     client: false
