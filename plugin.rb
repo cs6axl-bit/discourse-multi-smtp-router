@@ -2,7 +2,7 @@
 
 # name: discourse-multi-smtp-router
 # about: Route outgoing emails through multiple SMTP providers configured in SiteSettings. Supports: domain->provider overrides, weighted routing by % (coin flip), equal random routing, optional debug logs, optional async external logging, optional per-domain provider selection via metrics table. Supports per-provider domain swap.
-# version: 2.9.0
+# version: 2.9.1
 # authors: you
 # required_version: 3.0.0
 
@@ -143,7 +143,8 @@ after_initialize do
     # yahoo.com=provider_Y
     # --------------------
     def self.domain_provider_map
-      raw = Array(SiteSetting.multi_smtp_router_domain_provider_pairs)
+      # list settings come back as ONE pipe-delimited string ("a=x|b=y"), so split it (else only a single pair ever matched)
+      raw = Array(SiteSetting.multi_smtp_router_domain_provider_pairs).flat_map { |x| x.to_s.split(/[|\n]/) }
 
       map = {}
       raw.each do |line|
